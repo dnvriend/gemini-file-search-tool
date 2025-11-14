@@ -5,6 +5,9 @@ description = "Gemini File Search Tool"
 requires-python = ">=3.14"
 dependencies = [
     "click>=8.1.7",
+    "google-genai>=0.3.0",
+    "tqdm>=4.66.0",
+    "requests>=2.31.0",
 ]
 authors = [
     {name = "Dennis Vriend", email = "dvriend@ilionx.com"}
@@ -24,6 +27,8 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.7.0",
     "pytest>=7.4.0",
+    "types-requests>=2.31.0",
+    "types-tqdm>=4.66.0",
 ]
 
 [tool.ruff]
