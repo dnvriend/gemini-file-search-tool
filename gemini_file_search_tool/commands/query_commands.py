@@ -63,7 +63,42 @@ def query(
     verbose: bool,
     query_grounding_metadata: bool,
 ) -> None:
-    """Query documents in a file search store."""
+    """Query documents in a file search store using natural language.
+
+    Returns AI-generated answers with automatic citations from your documents.
+
+    Examples:
+
+    \b
+        # Basic query with Flash model (default)
+        gemini-file-search-tool query --store "research-papers" \\
+            --prompt "What are the main findings?"
+
+    \b
+        # Use Pro model for complex queries
+        gemini-file-search-tool query --store "papers" \\
+            --prompt "Compare and contrast the methodologies" --pro
+
+    \b
+        # Query with metadata filter
+        gemini-file-search-tool query --store "papers" \\
+            --prompt "Summarize the results" \\
+            --metadata-filter "author=Robert Graves"
+
+    \b
+        # Include grounding metadata in response
+        gemini-file-search-tool query --store "papers" \\
+            --prompt "What is the conclusion?" --query-grounding-metadata
+
+    \b
+    Output Format:
+        Returns JSON with answer and optional citations:
+        {
+          "answer": "The main findings are...",
+          "model": "gemini-2.5-flash",
+          "grounding_metadata": {...}  // if --query-grounding-metadata used
+        }
+    """
     try:
         normalized_name = normalize_store_name(store_name)
 

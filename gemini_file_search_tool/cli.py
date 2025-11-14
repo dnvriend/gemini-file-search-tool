@@ -26,10 +26,36 @@ from gemini_file_search_tool.commands.store_commands import (
 @click.group()
 @click.version_option(version="0.1.0", prog_name="gemini-file-search-tool")
 def cli() -> None:
-    """Gemini File Search Tool
+    """Gemini File Search Tool - Managed RAG for document search and Q&A.
 
-    A command-line tool for managing Gemini File Search stores, uploading files,
-    and querying documents using Google's fully managed RAG system.
+    A CLI and library for managing Gemini File Search stores, uploading documents,
+    and querying with Google's fully managed RAG system. Supports concurrent uploads,
+    duplicate detection, and natural language queries with automatic citations.
+
+    \b
+    Authentication:
+      Developer API (default):
+        Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.
+        Get your API key from: https://aistudio.google.com/app/apikey
+
+    \b
+      Vertex AI:
+        Set GOOGLE_GENAI_USE_VERTEXAI=true
+        Set GOOGLE_CLOUD_PROJECT='your-project-id'
+        Set GOOGLE_CLOUD_LOCATION='us-central1'
+
+    \b
+    Examples:
+      gemini-file-search-tool list-stores
+      gemini-file-search-tool create-store --name "research-papers"
+      gemini-file-search-tool upload "*.pdf" --store "research-papers"
+      gemini-file-search-tool query --store "research-papers" --prompt "Summarize key findings"
+
+    \b
+    For detailed help on each command:
+      gemini-file-search-tool create-store --help
+      gemini-file-search-tool upload --help
+      gemini-file-search-tool query --help
     """
     pass
 

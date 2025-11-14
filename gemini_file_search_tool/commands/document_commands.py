@@ -47,7 +47,13 @@ from gemini_file_search_tool.utils import (
     help="Enable verbose output",
 )
 def list_documents(store_name: str, verbose: bool) -> None:
-    """List all documents in a file search store."""
+    """List all documents in a file search store.
+
+    Example:
+
+    \b
+        gemini-file-search-tool list-documents --store "research-papers"
+    """
     try:
         normalized_name = normalize_store_name(store_name)
         print_verbose(f"Listing documents in store: {normalized_name}", verbose)
@@ -247,7 +253,52 @@ def upload(
     verbose: bool,
     skip_validation: bool,
 ) -> None:
-    """Upload file(s) to a file search store. Supports glob patterns."""
+    """Upload file(s) to a file search store. Supports glob patterns.
+
+    FILES can be file paths or glob patterns (*.pdf, docs/**/*.md).
+    Automatically detects duplicates and skips unchanged files.
+
+    Examples:
+
+    \b
+        # Upload single file
+        gemini-file-search-tool upload document.pdf --store "research-papers"
+
+    \b
+        # Upload multiple files
+        gemini-file-search-tool upload doc1.pdf doc2.pdf --store "papers"
+
+    \b
+        # Upload with glob pattern - all PDFs in current directory
+        gemini-file-search-tool upload "*.pdf" --store "papers"
+
+    \b
+        # Upload with recursive glob - all markdown files
+        gemini-file-search-tool upload "docs/**/*.md" --store "documentation"
+
+    \b
+        # With custom metadata
+        gemini-file-search-tool upload paper.pdf --store "papers" \\
+            --title "Research Paper 2024" --url "https://example.com/paper"
+
+    \b
+        # With custom chunking and workers
+        gemini-file-search-tool upload "*.pdf" --store "papers" \\
+            --max-tokens 500 --max-overlap 50 --num-workers 8
+
+    \b
+        # Skip validation for faster uploads
+        gemini-file-search-tool upload "*.txt" --store "notes" --skip-validation
+
+    \b
+    Output Format:
+        Returns JSON array with status for each file:
+        [
+          {"file": "doc.pdf", "status": "completed", "document_name": "..."},
+          {"file": "dup.pdf", "status": "skipped", "reason": "Already exists"},
+          {"file": "old.pdf", "status": "updated", "document_name": "..."}
+        ]
+    """
     try:
         # Expand file patterns
         files_to_upload = _expand_file_patterns(list(files), verbose)

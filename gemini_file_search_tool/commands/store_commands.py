@@ -51,7 +51,18 @@ from gemini_file_search_tool.utils import (
     help="Enable verbose output",
 )
 def create_store(name: str, verbose: bool) -> None:
-    """Create a new file search store."""
+    """Create a new file search store.
+
+    Examples:
+
+    \b
+        # Create a store
+        gemini-file-search-tool create-store --name "research-papers"
+
+    \b
+        # Create with verbose output
+        gemini-file-search-tool create-store --name "my-docs" -v
+    """
     try:
         print_verbose(f"Creating file search store: {name}", verbose)
         result = core_create_store(name)
@@ -73,7 +84,13 @@ def create_store(name: str, verbose: bool) -> None:
     help="Enable verbose output",
 )
 def list_stores(verbose: bool) -> None:
-    """List all file search stores."""
+    """List all file search stores.
+
+    Example:
+
+    \b
+        gemini-file-search-tool list-stores
+    """
     try:
         print_verbose("Listing all file search stores", verbose)
         stores = core_list_stores()
@@ -102,7 +119,18 @@ def list_stores(verbose: bool) -> None:
     help="Enable verbose output",
 )
 def get_store(store_name: str, verbose: bool) -> None:
-    """Get details of a specific file search store."""
+    """Get details of a specific file search store.
+
+    Examples:
+
+    \b
+        # Get by display name
+        gemini-file-search-tool get-store --store "research-papers"
+
+    \b
+        # Get by resource name
+        gemini-file-search-tool get-store --store "fileSearchStores/abc123"
+    """
     try:
         normalized_name = normalize_store_name(store_name)
         print_verbose(f"Getting store: {normalized_name}", verbose)
@@ -143,7 +171,15 @@ def get_store(store_name: str, verbose: bool) -> None:
     help="Enable verbose output",
 )
 def update_store(store_name: str, display_name: str, verbose: bool) -> None:
-    """Update a file search store's display name."""
+    """Update a file search store's display name.
+
+    Example:
+
+    \b
+        # Rename a store
+        gemini-file-search-tool update-store --store "old-name" \\
+            --display-name "new-name"
+    """
     try:
         normalized_name = normalize_store_name(store_name)
         print_verbose(f"Updating store: {normalized_name}", verbose)
@@ -181,7 +217,18 @@ def update_store(store_name: str, display_name: str, verbose: bool) -> None:
     help="Enable verbose output",
 )
 def delete_store(store_name: str, force: bool, verbose: bool) -> None:
-    """Delete a file search store."""
+    """Delete a file search store.
+
+    Examples:
+
+    \b
+        # Delete with confirmation prompt
+        gemini-file-search-tool delete-store --store "old-store"
+
+    \b
+        # Force deletion without prompt
+        gemini-file-search-tool delete-store --store "old-store" --force
+    """
     try:
         normalized_name = normalize_store_name(store_name)
         print_verbose(f"Deleting store: {normalized_name}", verbose)
