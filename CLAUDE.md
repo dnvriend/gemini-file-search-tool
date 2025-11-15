@@ -99,7 +99,11 @@ make clean          # Remove build artifacts and caches
   - Options: `--title`, `--url`, `--file-name`, `--max-tokens`, `--max-overlap`, `--num-workers`, `--skip-validation`
 
 ### Query Commands (query_commands.py)
-- `query --store NAME --prompt TEXT [--pro] [--metadata-filter FILTER]` - Query documents
+- `query --store NAME --prompt TEXT [--pro] [--metadata-filter FILTER] [--show-cost] [--verbose]` - Query documents
+  - **Note**: `--show-cost` includes cost estimation in JSON output
+  - **Note**: `--verbose` displays token usage and cost info to stderr
+  - Automatically tracks token usage (prompt, candidates, total)
+  - Estimates costs using current Gemini API pricing
 
 ## Library Usage
 
@@ -145,6 +149,86 @@ uv run pytest tests/ --cov=gemini_file_search_tool
 - **Upload Behavior**: Automatically detects duplicates, skips unchanged files, updates changed files
 - **Composability**: Clean stdout/stderr separation for piping (JSON to stdout, logs to stderr)
 - **Version Sync**: Keep version in sync across `cli.py`, `pyproject.toml`, and `__init__.py`
+
+## Cost Tracking
+
+The tool includes built-in cost tracking for query operations:
+
+### Implementation Details
+
+**Core Functions** (`core/query.py`):
+- `query_store()` automatically captures `usage_metadata` from API responses
+- Returns token counts: `prompt_token_count`, `candidates_token_count`, `total_token_count`
+- Token usage is always included in response (no opt-in required)
+
+**Utility Functions** (`utils.py`):
+- `estimate_cost(usage_metadata, model)` - Calculate estimated cost in USD
+  - Uses current Gemini API pricing (as of 2025-01)
+  - gemini-2.5-flash: $0.075 input / $0.30 output per 1M tokens
+  - gemini-2.5-pro: $1.25 input / $5.00 output per 1M tokens
+  - Returns `None` if usage_metadata is missing
+  - Raises `ValueError` for unknown models
+- `DecimalJSONEncoder` - Custom JSON encoder to prevent scientific notation
+  - Formats small floats as normal decimals (e.g., `0.00000045` not `4.5e-07`)
+  - Applied automatically in `output_json()`
+
+**CLI Command** (`commands/query_commands.py`):
+- `--show-cost` flag: Adds `estimated_cost` field to JSON output
+- `--verbose` flag: Displays token usage and cost info to stderr
+- Token usage always included in JSON response
+
+### Usage Examples
+
+```bash
+# View token usage (verbose mode)
+gemini-file-search-tool query --store "test" --prompt "What is this?" --verbose
+# Output to stderr: [INFO] Token usage: 150 prompt + 320 candidates = 470 total
+
+# Show estimated cost
+gemini-file-search-tool query --store "test" --prompt "What is this?" --show-cost --verbose
+# Output to stderr:
+# [INFO] Token usage: 150 prompt + 320 candidates = 470 total
+# [INFO] Estimated cost: $0.00010725 USD
+```
+
+### Response Format
+
+```json
+{
+  "response_text": "The document discusses...",
+  "usage_metadata": {
+    "prompt_token_count": 150,
+    "candidates_token_count": 320,
+    "total_token_count": 470
+  },
+  "estimated_cost": {
+    "input_cost_usd": 0.00001125,
+    "output_cost_usd": 0.000096,
+    "total_cost_usd": 0.00010725,
+    "currency": "USD",
+    "model": "gemini-2.5-flash",
+    "note": "Estimated cost based on current pricing. Subject to change."
+  }
+}
+```
+
+### Limitations
+
+- **Query Operations Only**: Token usage is only available for query operations
+- **No Upload Tracking**: Document embedding costs are not exposed by the API
+- **Local Estimation**: Costs are calculated locally using published pricing
+- **Pricing Updates**: Hardcoded pricing requires manual updates when Google changes rates
+- **No Historical Billing**: No API endpoint for aggregated billing or historical cost data
+
+### Testing
+
+Cost tracking is covered by comprehensive tests in `tests/test_utils.py`:
+- `test_estimate_cost_flash_model()` - Flash model cost calculation
+- `test_estimate_cost_pro_model()` - Pro model cost calculation
+- `test_estimate_cost_none_usage()` - Handles missing usage metadata
+- `test_estimate_cost_unknown_model()` - Validates model names
+- `test_estimate_cost_zero_tokens()` - Zero token edge case
+- `test_output_json_no_scientific_notation()` - Verifies decimal formatting
 
 ## Known Issues & Future Fixes
 

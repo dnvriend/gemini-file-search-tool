@@ -15,6 +15,7 @@ from gemini_file_search_tool.core.client import MissingConfigurationError
 from gemini_file_search_tool.core.query import QueryError
 from gemini_file_search_tool.core.query import query_store as core_query
 from gemini_file_search_tool.utils import (
+    estimate_cost,
     normalize_store_name,
     output_json,
     print_verbose,
@@ -55,6 +56,12 @@ from gemini_file_search_tool.utils import (
     default=False,
     help="Include grounding metadata in the response JSON",
 )
+@click.option(
+    "--show-cost",
+    is_flag=True,
+    default=False,
+    help="Include estimated cost calculation in the response JSON",
+)
 def query(
     store_name: str,
     prompt: str,
@@ -62,6 +69,7 @@ def query(
     metadata_filter: str | None,
     verbose: bool,
     query_grounding_metadata: bool,
+    show_cost: bool,
 ) -> None:
     """Query documents in a file search store using natural language.
 
@@ -91,12 +99,28 @@ def query(
             --prompt "What is the conclusion?" --query-grounding-metadata
 
     \b
+        # Show token usage and estimated cost
+        gemini-file-search-tool query --store "papers" \\
+            --prompt "Explain the methodology" --show-cost --verbose
+
+    \b
     Output Format:
-        Returns JSON with answer and optional citations:
+        Returns JSON with answer, token usage, and optional fields:
         {
-          "answer": "The main findings are...",
-          "model": "gemini-2.5-flash",
-          "grounding_metadata": {...}  // if --query-grounding-metadata used
+          "response_text": "The main findings are...",
+          "usage_metadata": {
+            "prompt_token_count": 150,
+            "candidates_token_count": 320,
+            "total_token_count": 470
+          },
+          "grounding_metadata": {...},  // if --query-grounding-metadata used
+          "estimated_cost": {            // if --show-cost used
+            "input_cost_usd": 0.00001125,
+            "output_cost_usd": 0.000096,
+            "total_cost_usd": 0.00010725,
+            "currency": "USD",
+            "model": "gemini-2.5-flash"
+          }
         }
     """
     try:
@@ -117,6 +141,29 @@ def query(
             metadata_filter=metadata_filter,
             include_grounding=query_grounding_metadata,
         )
+
+        # Display token usage if available
+        usage_metadata = result.get("usage_metadata")
+        if usage_metadata and verbose:
+            prompt_tokens = usage_metadata.get("prompt_token_count", 0)
+            candidates_tokens = usage_metadata.get("candidates_token_count", 0)
+            total_tokens = usage_metadata.get("total_token_count", 0)
+            click.echo(
+                f"[INFO] Token usage: {prompt_tokens} prompt + {candidates_tokens} "
+                f"candidates = {total_tokens} total",
+                err=True,
+            )
+
+        # Calculate and add estimated cost if requested
+        if show_cost:
+            cost_estimate = estimate_cost(usage_metadata, model)
+            if cost_estimate:
+                result["estimated_cost"] = cost_estimate
+                if verbose:
+                    total_cost = cost_estimate["total_cost_usd"]
+                    click.echo(f"[INFO] Estimated cost: ${total_cost:.8f} USD", err=True)
+            elif verbose:
+                click.echo("[WARN] Cost estimation unavailable: no usage metadata", err=True)
 
         print_verbose("Query completed successfully", verbose)
         output_json(result)

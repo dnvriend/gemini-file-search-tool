@@ -85,13 +85,39 @@ def normalize_store_name(store_name: str) -> str:
         return f"fileSearchStores/{store_name}"
 
 
+class DecimalJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that prevents scientific notation for small floats."""
+
+    def encode(self, obj: Any) -> str:
+        """Encode with custom float formatting."""
+        if isinstance(obj, float):
+            # Format floats with 8 decimal places, stripping trailing zeros
+            return f"{obj:.8f}".rstrip("0").rstrip(".")
+        return super().encode(obj)
+
+    def iterencode(self, obj: Any, _one_shot: bool = False) -> Any:
+        """Iterate encoding with custom float formatting."""
+        for chunk in super().iterencode(obj, _one_shot):
+            # Replace scientific notation in JSON output
+            import re
+
+            # Match scientific notation (e.g., 1.5e-07)
+            def replace_scientific(match: Any) -> str:
+                number = float(match.group(0))
+                formatted = f"{number:.8f}".rstrip("0").rstrip(".")
+                return formatted
+
+            chunk = re.sub(r"\d+\.?\d*e[+-]?\d+", replace_scientific, chunk)
+            yield chunk
+
+
 def output_json(data: dict[str, Any] | list[dict[str, Any]]) -> None:
-    """Output JSON to stdout.
+    """Output JSON to stdout without scientific notation for small floats.
 
     Args:
         data: Dictionary or list to output as JSON
     """
-    click.echo(json.dumps(data, indent=2))
+    click.echo(json.dumps(data, indent=2, cls=DecimalJSONEncoder))
 
 
 def print_verbose(message: str, verbose: bool = False) -> None:
@@ -103,3 +129,67 @@ def print_verbose(message: str, verbose: bool = False) -> None:
     """
     if verbose:
         click.echo(f"[INFO] {message}", err=True)
+
+
+def estimate_cost(usage_metadata: dict[str, int] | None, model: str) -> dict[str, Any] | None:
+    """Estimate query cost based on token usage and model pricing.
+
+    Uses published pricing from Google Gemini API documentation.
+    Pricing is subject to change - verify at: https://ai.google.dev/pricing
+
+    Current pricing (as of 2025-01):
+    - gemini-2.5-flash: $0.075 input / $0.30 output per 1M tokens
+    - gemini-2.5-pro: $1.25 input / $5.00 output per 1M tokens
+
+    Args:
+        usage_metadata: Dictionary with prompt_token_count and candidates_token_count
+        model: Model name (e.g., 'gemini-2.5-flash', 'gemini-2.5-pro')
+
+    Returns:
+        Dictionary with estimated costs in USD, or None if usage_metadata is missing:
+            - input_cost_usd: Cost of input tokens
+            - output_cost_usd: Cost of output tokens
+            - total_cost_usd: Total estimated cost
+            - currency: 'USD'
+            - model: Model name used for pricing
+            - note: Warning that pricing may change
+
+    Raises:
+        ValueError: If model is not recognized
+    """
+    if not usage_metadata:
+        return None
+
+    # Pricing per 1M tokens (USD)
+    pricing = {
+        "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
+        "gemini-2.5-pro": {"input": 1.25, "output": 5.00},
+    }
+
+    # Normalize model name (remove version suffixes if present)
+    model_key = model
+    if model not in pricing:
+        # Try to match base model name
+        for key in pricing:
+            if model.startswith(key):
+                model_key = key
+                break
+        else:
+            raise ValueError(
+                f"Unknown model '{model}'. Supported models: {', '.join(pricing.keys())}"
+            )
+
+    prompt_tokens = usage_metadata.get("prompt_token_count", 0)
+    candidates_tokens = usage_metadata.get("candidates_token_count", 0)
+
+    input_cost = (prompt_tokens / 1_000_000) * pricing[model_key]["input"]
+    output_cost = (candidates_tokens / 1_000_000) * pricing[model_key]["output"]
+
+    return {
+        "input_cost_usd": input_cost,
+        "output_cost_usd": output_cost,
+        "total_cost_usd": input_cost + output_cost,
+        "currency": "USD",
+        "model": model_key,
+        "note": "Estimated cost based on current pricing. Subject to change.",
+    }

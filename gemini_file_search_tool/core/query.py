@@ -39,6 +39,7 @@ def query_store(
     Returns:
         Dictionary containing:
             - response_text: Generated response text
+            - usage_metadata: Token usage statistics (prompt, candidates, total counts)
             - grounding_metadata: Grounding metadata with citations (if include_grounding=True)
 
     Raises:
@@ -77,6 +78,17 @@ def query_store(
         output: dict[str, Any] = {
             "response_text": response_text,
         }
+
+        # Extract usage metadata
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage = response.usage_metadata
+            output["usage_metadata"] = {
+                "prompt_token_count": getattr(usage, "prompt_token_count", 0),
+                "candidates_token_count": getattr(usage, "candidates_token_count", 0),
+                "total_token_count": getattr(usage, "total_token_count", 0),
+            }
+        else:
+            output["usage_metadata"] = None
 
         # Extract grounding metadata if requested
         if include_grounding and response.candidates and len(response.candidates) > 0:

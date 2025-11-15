@@ -58,6 +58,7 @@ Whether you're building AI-powered document search, integrating RAG into agentic
 - ✅ **Multi-Format Support**: PDF, DOCX, TXT, JSON, CSV, HTML, and source code files
 - ✅ **Natural Language Queries**: Ask questions in plain language and get contextual answers
 - ✅ **Automatic Citations**: Built-in source attribution and grounding metadata
+- ✅ **Cost Tracking**: Token usage monitoring and cost estimation for query operations
 - ✅ **Composable CLI**: JSON output for easy integration with other tools and scripts
 - ✅ **Python Library**: Import and use programmatically in your applications
 - ✅ **Type-Safe**: Strict mypy type checking and modern Python 3.14+ syntax
@@ -237,7 +238,65 @@ gemini-file-search-tool query --store "my-documents" \
 gemini-file-search-tool query --store "my-documents" \
   --prompt "Tell me about the book" \
   --metadata-filter "author=Robert Graves"
+
+# Query with cost tracking and verbose output
+gemini-file-search-tool query --store "my-documents" \
+  --prompt "Explain the methodology" \
+  --show-cost --verbose
 ```
+
+### Cost Tracking
+
+The CLI automatically tracks token usage for query operations and can estimate costs based on current Gemini API pricing:
+
+```bash
+# View token usage (verbose mode)
+gemini-file-search-tool query --store "my-documents" \
+  --prompt "What is this about?" --verbose
+
+# Output:
+# [INFO] Token usage: 150 prompt + 320 candidates = 470 total
+
+# Show estimated cost
+gemini-file-search-tool query --store "my-documents" \
+  --prompt "What is this about?" --show-cost --verbose
+
+# Output:
+# [INFO] Token usage: 150 prompt + 320 candidates = 470 total
+# [INFO] Estimated cost: $0.00010725 USD
+```
+
+**Query Response with Cost Information:**
+
+```json
+{
+  "response_text": "The document discusses...",
+  "usage_metadata": {
+    "prompt_token_count": 150,
+    "candidates_token_count": 320,
+    "total_token_count": 470
+  },
+  "estimated_cost": {
+    "input_cost_usd": 0.00001125,
+    "output_cost_usd": 0.000096,
+    "total_cost_usd": 0.00010725,
+    "currency": "USD",
+    "model": "gemini-2.5-flash",
+    "note": "Estimated cost based on current pricing. Subject to change."
+  }
+}
+```
+
+**Current Pricing (as of 2025-01):**
+- **gemini-2.5-flash**: $0.075 input / $0.30 output per 1M tokens
+- **gemini-2.5-pro**: $1.25 input / $5.00 output per 1M tokens
+
+**Note**: Pricing is subject to change. Verify current rates at [Google AI Pricing](https://ai.google.dev/pricing).
+
+**Limitations:**
+- Token usage is only available for query operations
+- Upload costs (document embedding) are not tracked by the API
+- Cost estimates are calculated locally using published pricing
 
 ### Library Usage
 
