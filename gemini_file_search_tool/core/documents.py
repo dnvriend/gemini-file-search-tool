@@ -7,6 +7,8 @@ Note: This code was generated with assistance from AI coding tools
 and has been reviewed and tested by a human.
 """
 
+import logging
+import mimetypes
 import os
 import time
 from collections.abc import Callable
@@ -17,6 +19,15 @@ from typing import Any
 import requests
 
 from gemini_file_search_tool.core.client import get_client
+
+logger = logging.getLogger(__name__)
+
+# Register additional MIME types for common configuration files
+# This ensures files with non-standard extensions can be uploaded successfully
+mimetypes.add_type("text/toml", ".toml")
+mimetypes.add_type("text/plain", ".env")
+mimetypes.add_type("text/plain", ".txt")
+mimetypes.add_type("text/markdown", ".md")
 
 
 class DocumentError(Exception):
@@ -140,8 +151,19 @@ def _validate_file(file_path: Path, skip_validation: bool) -> None:
     if skip_validation:
         return
 
-    # Check file size (50MB limit)
+    # Check file size
     file_size = file_path.stat().st_size
+
+    # Check for empty files (0 bytes)
+    # Empty files cause "Upload has already been terminated" error
+    # due to resumable upload protocol limitations
+    if file_size == 0:
+        raise FileValidationError(
+            f"File is empty (0 bytes): {file_path}. "
+            "Empty files cannot be uploaded to Gemini File Search."
+        )
+
+    # Check file size (50MB limit)
     max_size = 50 * 1024 * 1024  # 50MB
     if file_size > max_size:
         raise FileValidationError(
@@ -208,8 +230,14 @@ def upload_file(
     }
 
     try:
+        # Log upload start
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        logger.info(f"Uploading: {file_path} ({file_size_mb:.2f}MB) to store '{store_name}'")
+
         # Validate file
+        logger.debug(f"Validating file: {file_path}")
         _validate_file(file_path, skip_validation)
+        logger.debug(f"File validation passed: {file_path}")
 
         client = get_client()
 
@@ -241,24 +269,42 @@ def upload_file(
             config["custom_metadata"] = custom_metadata
 
         # Upload file
+        logger.debug(f"Starting upload operation for: {file_path}")
         operation = client.file_search_stores.upload_to_file_search_store(
             file=str(file_path),
             file_search_store_name=store_name,
             config=config,  # type: ignore[arg-type]
         )
 
-        # Poll for completion
+        operation_id = operation.name if hasattr(operation, "name") else "unknown"
+        logger.debug(f"Operation started: {operation_id}")
+
+        # Poll for completion with exponential backoff
+        poll_interval = 2
+        max_interval = 30
+        poll_count = 0
+
         while not operation.done:
-            time.sleep(2)
+            poll_count += 1
+            logger.debug(f"Polling operation {operation_id} (attempt {poll_count}) - waiting {poll_interval}s")
+            time.sleep(poll_interval)
             operation = client.operations.get(operation)
 
+            # Exponential backoff: increase polling interval up to max
+            poll_interval = min(poll_interval * 1.5, max_interval)
+
         if operation.error:
-            result["error"] = f"Upload failed: {operation.error}"
+            error_msg = f"Upload failed: {operation.error}"
+            logger.error(f"Operation {operation_id} failed: {operation.error}")
+            logger.error(f"File: {file_path}")
+            result["error"] = error_msg
+            result["operation_id"] = operation_id
             return result
 
         # Success
         result["status"] = "completed"
         result["operation"] = operation.name if hasattr(operation, "name") else None
+        logger.info(f"Upload completed successfully: {file_path}")
 
         # Try to get document info from operation response
         if hasattr(operation, "response") and operation.response:
@@ -269,10 +315,17 @@ def upload_file(
 
         return result
     except FileValidationError as e:
-        result["error"] = str(e)
+        error_msg = str(e)
+        logger.error(f"File validation failed: {file_path}")
+        logger.error(f"Validation error: {error_msg}")
+        result["error"] = error_msg
         return result
     except Exception as e:
-        result["error"] = f"Upload failed: {str(e)}"
+        error_msg = f"Upload failed: {str(e)}"
+        logger.error(f"Upload exception for {file_path}: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.debug(f"Full traceback:", exc_info=True)
+        result["error"] = error_msg
         return result
 
 
@@ -318,9 +371,12 @@ def upload_files_concurrent(
     if not files:
         return []
 
-    # Set default num_workers to CPU count if not specified
+    # Set default num_workers to conservative value for I/O-bound operations
+    # File uploads are network-bound, not CPU-bound, so using CPU count is excessive
+    # A conservative default of 4 balances throughput with API stability
     if num_workers is None:
-        num_workers = os.cpu_count() or 1
+        num_workers = min(4, os.cpu_count() or 1)
+        logger.debug(f"Using default num_workers: {num_workers}")
 
     # Prepare arguments for upload function
     upload_args = [

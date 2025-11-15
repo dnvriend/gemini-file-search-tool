@@ -25,11 +25,61 @@ from gemini_file_search_tool.core.documents import (
 from gemini_file_search_tool.core.documents import (
     list_documents as core_list_documents,
 )
+from gemini_file_search_tool.logging_config import get_logger, setup_logging
 from gemini_file_search_tool.utils import (
     normalize_store_name,
     output_json,
     print_verbose,
 )
+
+# System files and directories to skip during upload
+# These files are typically not useful for RAG/search and may cause issues
+SKIP_PATTERNS = [
+    "__pycache__",
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".so",
+    ".dylib",
+    ".DS_Store",
+    ".git",
+    ".svn",
+    ".hg",
+    ".venv",
+    "venv",
+    ".env/",
+    "node_modules",
+    ".egg-info",
+    "dist",
+    "build",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".coverage",
+]
+
+
+def _should_skip_file(file_path: Path) -> bool:
+    """Check if a file should be skipped based on skip patterns.
+
+    Args:
+        file_path: Path to check
+
+    Returns:
+        True if file should be skipped, False otherwise
+    """
+    file_str = str(file_path)
+    file_name = file_path.name
+
+    for pattern in SKIP_PATTERNS:
+        # Check if pattern is in path (for directories like __pycache__)
+        if pattern in file_str:
+            return True
+        # Check if file ends with pattern (for extensions like .pyc)
+        if file_name.endswith(pattern):
+            return True
+
+    return False
 
 
 @click.command("list-documents")
@@ -43,10 +93,10 @@ from gemini_file_search_tool.utils import (
 @click.option(
     "-v",
     "--verbose",
-    is_flag=True,
-    help="Enable verbose output",
+    count=True,
+    help="Enable verbose output (use -v for INFO, -vv for DEBUG, -vvv for TRACE)",
 )
-def list_documents(store_name: str, verbose: bool) -> None:
+def list_documents(store_name: str, verbose: int) -> None:
     """List all documents in a file search store.
 
     Example:
@@ -95,7 +145,7 @@ def _expand_file_patterns(patterns: list[str], verbose: bool) -> list[Path]:
         if not has_wildcards:
             # No wildcards - treat as direct file path
             file_path = Path(expanded).resolve()
-            if file_path.exists() and file_path.is_file():
+            if file_path.exists() and file_path.is_file() and not _should_skip_file(file_path):
                 all_files.append(file_path)
         else:
             # Has wildcards - split base dir and pattern
@@ -125,9 +175,15 @@ def _expand_file_patterns(patterns: list[str], verbose: bool) -> list[Path]:
                 found_files = list(base_dir.glob(glob_pattern))
                 print_verbose(f"Glob found {len(found_files)} items", verbose)
 
-                # Filter to only include files
+                # Filter to only include files (not directories)
                 found_files = [f for f in found_files if f.is_file()]
                 print_verbose(f"After filtering: {len(found_files)} files", verbose)
+
+                # Filter out system files
+                found_files = [f for f in found_files if not _should_skip_file(f)]
+                print_verbose(
+                    f"After skipping system files: {len(found_files)} files", verbose
+                )
 
                 all_files.extend(found_files)
             except Exception as e:
@@ -233,8 +289,8 @@ def _fetch_existing_documents(store_name: str, verbose: bool) -> dict[str, dict[
 @click.option(
     "-v",
     "--verbose",
-    is_flag=True,
-    help="Enable verbose output (shows upload progress)",
+    count=True,
+    help="Enable verbose output (use -v for INFO, -vv for DEBUG, -vvv for TRACE)",
 )
 @click.option(
     "--skip-validation",
@@ -250,7 +306,7 @@ def upload(
     max_tokens: int,
     max_overlap: int,
     num_workers: int | None,
-    verbose: bool,
+    verbose: int,
     skip_validation: bool,
 ) -> None:
     """Upload file(s) to a file search store. Supports glob patterns.
@@ -299,7 +355,13 @@ def upload(
           {"file": "old.pdf", "status": "updated", "document_name": "..."}
         ]
     """
+    # Setup logging based on verbosity level
+    setup_logging(verbose)
+    logger = get_logger(__name__)
+
     try:
+        logger.info("Starting upload operation")
+
         # Expand file patterns
         files_to_upload = _expand_file_patterns(list(files), verbose)
 
