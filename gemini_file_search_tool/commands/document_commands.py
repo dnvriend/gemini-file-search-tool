@@ -469,7 +469,7 @@ def upload(
             ) as pbar:
 
                 def progress_callback(result: dict[str, Any]) -> None:
-                    nonlocal success_count, failure_count, updated_count
+                    nonlocal success_count, failure_count, updated_count, skipped_count
                     file_path = Path(result["file"])
 
                     if file_path in updated_files and result["status"] == "completed":
@@ -477,6 +477,8 @@ def upload(
                         updated_count += 1
                     elif result["status"] == "completed":
                         success_count += 1
+                    elif result["status"] == "skipped":
+                        skipped_count += 1
                     else:
                         failure_count += 1
 
@@ -506,8 +508,9 @@ def upload(
 
                 results.extend(upload_results)
 
-            # Exit with error if all uploads failed
-            if failure_count == len(files_to_actually_upload):
+            # Exit with error if all uploads failed (excluding skipped files like empty files)
+            successful_uploads = success_count + updated_count
+            if failure_count > 0 and successful_uploads == 0 and skipped_count == 0:
                 click.echo(
                     f"Error: All {len(files_to_actually_upload)} attempted upload(s) failed",
                     err=True,

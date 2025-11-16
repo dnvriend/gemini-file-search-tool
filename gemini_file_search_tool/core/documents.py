@@ -155,12 +155,10 @@ def _validate_file(file_path: Path, skip_validation: bool) -> None:
     file_size = file_path.stat().st_size
 
     # Check for empty files (0 bytes)
-    # Empty files cause "Upload has already been terminated" error
-    # due to resumable upload protocol limitations
+    # Empty files provide no value for RAG/search and cause API errors
     if file_size == 0:
         raise FileValidationError(
-            f"File is empty (0 bytes): {file_path}. "
-            "Empty files cannot be uploaded to Gemini File Search."
+            f"Empty file (0 bytes) - skipping. Empty files provide no value for search: {file_path}"
         )
 
     # Check file size (50MB limit)
@@ -316,9 +314,17 @@ def upload_file(
         return result
     except FileValidationError as e:
         error_msg = str(e)
-        logger.error(f"File validation failed: {file_path}")
-        logger.error(f"Validation error: {error_msg}")
-        result["error"] = error_msg
+
+        # Check if it's an empty file (should be treated as warning, not error)
+        if "Empty file (0 bytes)" in error_msg:
+            logger.warning(f"Skipping empty file: {file_path}")
+            result["status"] = "skipped"
+            result["reason"] = "Empty file (0 bytes) - no content to index"
+        else:
+            logger.error(f"File validation failed: {file_path}")
+            logger.error(f"Validation error: {error_msg}")
+            result["error"] = error_msg
+
         return result
     except Exception as e:
         error_msg = f"Upload failed: {str(e)}"
