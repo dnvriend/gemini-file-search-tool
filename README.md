@@ -1,7 +1,7 @@
 # gemini-file-search-tool
 
 <div align="center">
-  <img src="rag-icon.png" alt="RAG Icon" width="200" />
+  <img src=".github/assets/rag-icon.png" alt="RAG Icon" width="200" />
   <br>
   <br>
 
