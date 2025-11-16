@@ -120,12 +120,12 @@ def output_json(data: dict[str, Any] | list[dict[str, Any]]) -> None:
     click.echo(json.dumps(data, indent=2, cls=DecimalJSONEncoder))
 
 
-def print_verbose(message: str, verbose: bool = False) -> None:
+def print_verbose(message: str, verbose: bool | int = False) -> None:
     """Print verbose message to stderr.
 
     Args:
         message: Message to print
-        verbose: Whether verbose mode is enabled
+        verbose: Whether verbose mode is enabled (bool or int count)
     """
     if verbose:
         click.echo(f"[INFO] {message}", err=True)

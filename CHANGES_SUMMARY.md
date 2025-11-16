@@ -64,6 +64,32 @@ if file_size == 0:
 
 **Impact**: Clear error message for empty files instead of cryptic "Upload terminated" error.
 
+**Update (2025-01-16)**: Changed to skip empty files with WARNING instead of failing with ERROR. Empty files now return `status: "skipped"` with reason.
+
+### 2a. Base64 Image Validation Fix (`core/documents.py`)
+**Lines: 186-208**
+
+**Problem**: Original validation used simple string search for `"data:image/"` AND `";base64,"`, which caused false positive on the validation code itself (self-referential problem).
+
+**Before**:
+```python
+if "data:image/" in content and ";base64," in content:
+    raise FileValidationError(...)
+```
+
+**After**:
+```python
+import re
+if re.search(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{50,}', content):
+    raise FileValidationError(...)
+```
+
+**Impact**:
+- No more false positives on source code containing these strings
+- Regex matches actual base64 image data URL pattern
+- Requires at least 50 characters of base64 data (not just keywords)
+- `documents.py` now uploads successfully without triggering its own validation
+
 ### 3. System File Skip Patterns (`commands/document_commands.py`)
 **Lines: 35-80**
 

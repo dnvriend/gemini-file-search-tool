@@ -1,7 +1,21 @@
 """Document management operations for file search stores.
 
 This module provides functions for listing and uploading documents to
-Gemini file search stores.
+Gemini file search stores, enabling both traditional document RAG and
+Code-RAG (semantic code search with natural language queries).
+
+Key Features:
+- Upload documents with automatic chunking and embedding
+- Support for source code files (.py, .js, .go, etc.) for Code-RAG
+- Automatic MIME-type detection (.toml, .env, .txt, .md)
+- Empty file handling (0-byte files skipped with warning)
+- System file filtering (__pycache__, .pyc, .DS_Store)
+- Multi-level logging with -v/-vv/-vvv support
+
+Code-RAG Use Case:
+Upload entire codebases to enable semantic code search. Ask natural
+language questions like "how does authentication work?" or "where is
+error handling implemented?" without traditional grep/search.
 
 Note: This code was generated with assistance from AI coding tools
 and has been reviewed and tested by a human.
@@ -170,10 +184,14 @@ def _validate_file(file_path: Path, skip_validation: bool) -> None:
         )
 
     # Check for base64 images (can cause upload failures)
+    # Look for the actual pattern "data:image/...;base64,..." not just both strings
     try:
         with open(file_path, encoding="utf-8") as f:
             content = f.read(1024 * 10)  # Read first 10KB
-            if "data:image/" in content and ";base64," in content:
+            # Use regex to match actual base64 image pattern
+            import re
+
+            if re.search(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]{50,}", content):
                 raise FileValidationError(
                     f"File contains base64-encoded images which may cause "
                     f"upload failures. Use --skip-validation to bypass: {file_path}"
@@ -278,13 +296,16 @@ def upload_file(
         logger.debug(f"Operation started: {operation_id}")
 
         # Poll for completion with exponential backoff
-        poll_interval = 2
-        max_interval = 30
+        poll_interval: float = 2.0
+        max_interval: float = 30.0
         poll_count = 0
 
         while not operation.done:
             poll_count += 1
-            logger.debug(f"Polling operation {operation_id} (attempt {poll_count}) - waiting {poll_interval}s")
+            logger.debug(
+                f"Polling operation {operation_id} (attempt {poll_count}) - "
+                f"waiting {poll_interval}s"
+            )
             time.sleep(poll_interval)
             operation = client.operations.get(operation)
 
@@ -330,7 +351,7 @@ def upload_file(
         error_msg = f"Upload failed: {str(e)}"
         logger.error(f"Upload exception for {file_path}: {type(e).__name__}")
         logger.error(f"Error message: {str(e)}")
-        logger.debug(f"Full traceback:", exc_info=True)
+        logger.debug("Full traceback:", exc_info=True)
         result["error"] = error_msg
         return result
 
