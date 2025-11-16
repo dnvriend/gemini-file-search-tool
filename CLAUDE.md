@@ -92,16 +92,23 @@ make clean          # Remove build artifacts and caches
 - `delete-store --store NAME [--force]` - Delete store
 
 ### Document Commands (document_commands.py)
-- `list-documents --store NAME` - List documents in store
-- `upload FILES... --store NAME [OPTIONS]` - Upload files (supports globs)
+- `list-documents --store NAME [-v|-vv|-vvv]` - List documents in store
+  - Supports multi-level verbosity for logging
+- `upload FILES... --store NAME [OPTIONS] [-v|-vv|-vvv]` - Upload files (supports globs)
   - **Note**: FILES is positional (changed from `--input`)
   - Supports glob patterns: `*.pdf`, `docs/**/*.md`
-  - Options: `--title`, `--url`, `--file-name`, `--max-tokens`, `--max-overlap`, `--num-workers`, `--skip-validation`
+  - Options: `--title`, `--url`, `--file-name`, `--max-tokens`, `--max-overlap`, `--num-workers`, `--skip-validation`, `--ignore-gitignore`, `--dry-run`
+  - **Verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE with library logging)
+  - **System File Filtering**: Automatically skips `__pycache__`, `.pyc`, `.DS_Store`, etc.
+  - **Gitignore Support**: Automatically respects `.gitignore` patterns (use `--ignore-gitignore` to disable)
+  - **Dry-Run Mode**: Use `--dry-run` to preview files without uploading (returns JSON with file paths and sizes)
+  - **Empty File Handling**: Skips 0-byte files with warning (not error)
+  - **MIME-Type Support**: Registers `.toml`, `.env` files automatically
 
 ### Query Commands (query_commands.py)
-- `query --store NAME --prompt TEXT [--pro] [--metadata-filter FILTER] [--show-cost] [--verbose]` - Query documents
+- `query --store NAME --prompt TEXT [--pro] [--metadata-filter FILTER] [--show-cost] [-v|-vv|-vvv]` - Query documents
   - **Note**: `--show-cost` includes cost estimation in JSON output
-  - **Note**: `--verbose` displays token usage and cost info to stderr
+  - **Verbosity**: `-v` displays token usage and cost info to stderr, `-vv` shows API operations, `-vvv` shows full HTTP traces
   - Automatically tracks token usage (prompt, candidates, total)
   - Estimates costs using current Gemini API pricing
 
@@ -134,9 +141,41 @@ uv run pytest tests/ -v
 uv run pytest tests/ --cov=gemini_file_search_tool
 ```
 
+## Code-RAG Capability
+
+This tool enables **Code-RAG (Retrieval-Augmented Generation for Code)** - the ability to upload entire codebases and query them with natural language. This is powerful for:
+
+- **Codebase Onboarding**: New developers can ask questions about architecture and implementation
+- **Code Discovery**: Find where specific functionality is implemented without grepping
+- **Architecture Analysis**: Understand design patterns and structural decisions
+- **Documentation Generation**: Generate contextual documentation from actual code
+- **AI Coding Assistants**: Build agents that can answer questions about your codebase
+
+**Example Usage:**
+```bash
+# Upload a codebase
+gemini-file-search-tool upload "src/**/*.py" --store "my-project" -v
+
+# Query with natural language
+gemini-file-search-tool query --store "my-project" \
+  --prompt "How does the authentication system work?" -v
+
+# Ask architectural questions
+gemini-file-search-tool query --store "my-project" \
+  --prompt "What design patterns are used?" --pro
+```
+
+**Meta Note**: This tool itself was built using Code-RAG! During development, we uploaded the codebase to a Gemini File Search store and queried it to understand implementation details, find bugs, and plan features. The tool enables the very functionality it provides.
+
+**Source Code Documentation**: All Python modules include comprehensive docstrings to maximize Code-RAG effectiveness. Well-documented code provides better semantic search results and more accurate answers.
+
 ## Important Notes
 
 - **Core Dependency**: Uses [Google Generative AI Python SDK](https://github.com/googleapis/python-genai) (`google-genai>=0.3.0`)
+- **Logging Module** (`logging_config.py`): Centralized multi-level verbosity configuration
+  - Setup: `setup_logging(verbose_count)` at command start
+  - Levels: 0=WARNING, 1=INFO, 2=DEBUG, 3+=TRACE (with library logging)
+  - Library loggers: Configures `httpx`, `httpcore`, `google-api-core` at TRACE level
 - **Authentication Support**: The CLI automatically detects and supports both authentication methods:
   - **Gemini Developer API** (default): Requires `GEMINI_API_KEY` or `GOOGLE_API_KEY` (latter takes precedence)
   - **Vertex AI**: Requires `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`
@@ -147,6 +186,17 @@ uv run pytest tests/ --cov=gemini_file_search_tool
   - Raises `MissingConfigurationError` with helpful messages for missing configuration
 - **Store Name Resolution**: `normalize_store_name()` accepts display names, IDs, or full resource names
 - **Upload Behavior**: Automatically detects duplicates, skips unchanged files, updates changed files
+- **File Validation** (`core/documents.py:_validate_file()`):
+  - Empty file detection (0 bytes) - skipped with warning
+  - File size limit (50MB)
+  - Base64 image detection using regex pattern `data:image/[^;]+;base64,[A-Za-z0-9+/=]{50,}`
+  - System file filtering (__pycache__, .pyc, .DS_Store)
+  - Gitignore pattern matching (`commands/document_commands.py:_load_gitignore_patterns()`)
+    - Automatically loads .gitignore from working directory
+    - Uses fnmatch for pattern matching
+    - Supports directory patterns (ending with /), path-specific patterns (with /), and simple patterns
+    - Disable with `--ignore-gitignore` flag
+  - MIME-type registration (.toml, .env, .txt, .md)
 - **Composability**: Clean stdout/stderr separation for piping (JSON to stdout, logs to stderr)
 - **Version Sync**: Keep version in sync across `cli.py`, `pyproject.toml`, and `__init__.py`
 

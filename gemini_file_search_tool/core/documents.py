@@ -1,12 +1,28 @@
 """Document management operations for file search stores.
 
 This module provides functions for listing and uploading documents to
-Gemini file search stores.
+Gemini file search stores, enabling both traditional document RAG and
+Code-RAG (semantic code search with natural language queries).
+
+Key Features:
+- Upload documents with automatic chunking and embedding
+- Support for source code files (.py, .js, .go, etc.) for Code-RAG
+- Automatic MIME-type detection (.toml, .env, .txt, .md)
+- Empty file handling (0-byte files skipped with warning)
+- System file filtering (__pycache__, .pyc, .DS_Store)
+- Multi-level logging with -v/-vv/-vvv support
+
+Code-RAG Use Case:
+Upload entire codebases to enable semantic code search. Ask natural
+language questions like "how does authentication work?" or "where is
+error handling implemented?" without traditional grep/search.
 
 Note: This code was generated with assistance from AI coding tools
 and has been reviewed and tested by a human.
 """
 
+import logging
+import mimetypes
 import os
 import time
 from collections.abc import Callable
@@ -17,6 +33,15 @@ from typing import Any
 import requests
 
 from gemini_file_search_tool.core.client import get_client
+
+logger = logging.getLogger(__name__)
+
+# Register additional MIME types for common configuration files
+# This ensures files with non-standard extensions can be uploaded successfully
+mimetypes.add_type("text/toml", ".toml")
+mimetypes.add_type("text/plain", ".env")
+mimetypes.add_type("text/plain", ".txt")
+mimetypes.add_type("text/markdown", ".md")
 
 
 class DocumentError(Exception):
@@ -140,8 +165,17 @@ def _validate_file(file_path: Path, skip_validation: bool) -> None:
     if skip_validation:
         return
 
-    # Check file size (50MB limit)
+    # Check file size
     file_size = file_path.stat().st_size
+
+    # Check for empty files (0 bytes)
+    # Empty files provide no value for RAG/search and cause API errors
+    if file_size == 0:
+        raise FileValidationError(
+            f"Empty file (0 bytes) - skipping. Empty files provide no value for search: {file_path}"
+        )
+
+    # Check file size (50MB limit)
     max_size = 50 * 1024 * 1024  # 50MB
     if file_size > max_size:
         raise FileValidationError(
@@ -150,10 +184,14 @@ def _validate_file(file_path: Path, skip_validation: bool) -> None:
         )
 
     # Check for base64 images (can cause upload failures)
+    # Look for the actual pattern "data:image/...;base64,..." not just both strings
     try:
         with open(file_path, encoding="utf-8") as f:
             content = f.read(1024 * 10)  # Read first 10KB
-            if "data:image/" in content and ";base64," in content:
+            # Use regex to match actual base64 image pattern
+            import re
+
+            if re.search(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]{50,}", content):
                 raise FileValidationError(
                     f"File contains base64-encoded images which may cause "
                     f"upload failures. Use --skip-validation to bypass: {file_path}"
@@ -208,8 +246,14 @@ def upload_file(
     }
 
     try:
+        # Log upload start
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        logger.info(f"Uploading: {file_path} ({file_size_mb:.2f}MB) to store '{store_name}'")
+
         # Validate file
+        logger.debug(f"Validating file: {file_path}")
         _validate_file(file_path, skip_validation)
+        logger.debug(f"File validation passed: {file_path}")
 
         client = get_client()
 
@@ -241,24 +285,45 @@ def upload_file(
             config["custom_metadata"] = custom_metadata
 
         # Upload file
+        logger.debug(f"Starting upload operation for: {file_path}")
         operation = client.file_search_stores.upload_to_file_search_store(
             file=str(file_path),
             file_search_store_name=store_name,
             config=config,  # type: ignore[arg-type]
         )
 
-        # Poll for completion
+        operation_id = operation.name if hasattr(operation, "name") else "unknown"
+        logger.debug(f"Operation started: {operation_id}")
+
+        # Poll for completion with exponential backoff
+        poll_interval: float = 2.0
+        max_interval: float = 30.0
+        poll_count = 0
+
         while not operation.done:
-            time.sleep(2)
+            poll_count += 1
+            logger.debug(
+                f"Polling operation {operation_id} (attempt {poll_count}) - "
+                f"waiting {poll_interval}s"
+            )
+            time.sleep(poll_interval)
             operation = client.operations.get(operation)
 
+            # Exponential backoff: increase polling interval up to max
+            poll_interval = min(poll_interval * 1.5, max_interval)
+
         if operation.error:
-            result["error"] = f"Upload failed: {operation.error}"
+            error_msg = f"Upload failed: {operation.error}"
+            logger.error(f"Operation {operation_id} failed: {operation.error}")
+            logger.error(f"File: {file_path}")
+            result["error"] = error_msg
+            result["operation_id"] = operation_id
             return result
 
         # Success
         result["status"] = "completed"
         result["operation"] = operation.name if hasattr(operation, "name") else None
+        logger.info(f"Upload completed successfully: {file_path}")
 
         # Try to get document info from operation response
         if hasattr(operation, "response") and operation.response:
@@ -269,10 +334,25 @@ def upload_file(
 
         return result
     except FileValidationError as e:
-        result["error"] = str(e)
+        error_msg = str(e)
+
+        # Check if it's an empty file (should be treated as warning, not error)
+        if "Empty file (0 bytes)" in error_msg:
+            logger.warning(f"Skipping empty file: {file_path}")
+            result["status"] = "skipped"
+            result["reason"] = "Empty file (0 bytes) - no content to index"
+        else:
+            logger.error(f"File validation failed: {file_path}")
+            logger.error(f"Validation error: {error_msg}")
+            result["error"] = error_msg
+
         return result
     except Exception as e:
-        result["error"] = f"Upload failed: {str(e)}"
+        error_msg = f"Upload failed: {str(e)}"
+        logger.error(f"Upload exception for {file_path}: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.debug("Full traceback:", exc_info=True)
+        result["error"] = error_msg
         return result
 
 
@@ -318,9 +398,12 @@ def upload_files_concurrent(
     if not files:
         return []
 
-    # Set default num_workers to CPU count if not specified
+    # Set default num_workers to conservative value for I/O-bound operations
+    # File uploads are network-bound, not CPU-bound, so using CPU count is excessive
+    # A conservative default of 4 balances throughput with API stability
     if num_workers is None:
-        num_workers = os.cpu_count() or 1
+        num_workers = min(4, os.cpu_count() or 1)
+        logger.debug(f"Using default num_workers: {num_workers}")
 
     # Prepare arguments for upload function
     upload_args = [

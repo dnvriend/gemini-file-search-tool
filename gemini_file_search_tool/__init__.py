@@ -4,6 +4,8 @@ This package provides both a command-line interface and a Python library for
 managing Gemini File Search stores, uploading documents, and querying with
 Google's fully managed RAG system.
 
+Supports both traditional document RAG and Code-RAG (semantic code search).
+
 Library Usage:
     from gemini_file_search_tool import create_store, upload_file, query_store
 
@@ -15,6 +17,24 @@ Library Usage:
 
     # Query the store
     response = query_store(store["name"], "What is in this document?")
+    print(response["response_text"])
+
+Code-RAG Example:
+    from gemini_file_search_tool import create_store, upload_files_concurrent, query_store
+    from pathlib import Path
+
+    # Create store for codebase
+    store = create_store("my-codebase")
+
+    # Upload all Python files
+    files = list(Path("src").glob("**/*.py"))
+    upload_files_concurrent(files, store["name"])
+
+    # Query with natural language
+    response = query_store(
+        store["name"],
+        "How does the authentication system work?"
+    )
     print(response["response_text"])
 
 Note: This code was generated with assistance from AI coding tools

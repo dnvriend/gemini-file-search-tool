@@ -25,11 +25,152 @@ from gemini_file_search_tool.core.documents import (
 from gemini_file_search_tool.core.documents import (
     list_documents as core_list_documents,
 )
+from gemini_file_search_tool.logging_config import get_logger, setup_logging
 from gemini_file_search_tool.utils import (
     normalize_store_name,
     output_json,
     print_verbose,
 )
+
+# System files and directories to skip during upload
+# These files are typically not useful for RAG/search and may cause issues
+SKIP_PATTERNS = [
+    "__pycache__",
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".so",
+    ".dylib",
+    ".DS_Store",
+    ".git",
+    ".svn",
+    ".hg",
+    ".venv",
+    "venv",
+    ".env/",
+    "node_modules",
+    ".egg-info",
+    "dist",
+    "build",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".coverage",
+]
+
+
+def _load_gitignore_patterns(start_path: Path) -> list[str]:
+    """Load patterns from .gitignore file if it exists.
+
+    Searches for .gitignore starting from start_path up to root.
+
+    Args:
+        start_path: Path to start searching for .gitignore
+
+    Returns:
+        List of gitignore patterns (empty if no .gitignore found)
+    """
+    patterns: list[str] = []
+
+    # Search from current path up to root
+    current = start_path.resolve()
+    while current != current.parent:
+        gitignore = current / ".gitignore"
+        if gitignore.exists():
+            try:
+                with open(gitignore) as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if line and not line.startswith("#"):
+                            patterns.append(line)
+            except Exception:
+                pass  # Ignore read errors
+            break  # Only use first .gitignore found
+        current = current.parent
+
+    return patterns
+
+
+def _matches_gitignore_pattern(file_path: Path, pattern: str, gitignore_dir: Path) -> bool:
+    """Check if file matches a gitignore pattern.
+
+    Args:
+        file_path: Path to check
+        pattern: Gitignore pattern
+        gitignore_dir: Directory containing .gitignore
+
+    Returns:
+        True if file matches pattern, False otherwise
+    """
+    import fnmatch
+
+    try:
+        # Get relative path from gitignore directory
+        rel_path = file_path.relative_to(gitignore_dir)
+        rel_path_str = str(rel_path)
+
+        # Handle directory patterns (ending with /)
+        if pattern.endswith("/"):
+            pattern = pattern.rstrip("/")
+            # Check if any parent directory matches
+            for parent in rel_path.parents:
+                if parent.name and fnmatch.fnmatch(str(parent.name), pattern):
+                    return True
+            return False
+
+        # Handle patterns with / (path-specific)
+        if "/" in pattern:
+            return fnmatch.fnmatch(rel_path_str, pattern)
+
+        # Handle simple patterns (match anywhere in path)
+        # Check filename
+        if fnmatch.fnmatch(file_path.name, pattern):
+            return True
+
+        # Check if pattern matches any part of the path
+        for part in rel_path.parts:
+            if fnmatch.fnmatch(part, pattern):
+                return True
+
+        return False
+    except ValueError:
+        # File is not relative to gitignore_dir
+        return False
+
+
+def _should_skip_file(
+    file_path: Path, gitignore_patterns: list[str] = [], gitignore_dir: Path | None = None
+) -> bool:
+    """Check if a file should be skipped based on skip patterns and gitignore.
+
+    Args:
+        file_path: Path to check
+        gitignore_patterns: List of gitignore patterns to check
+        gitignore_dir: Directory containing .gitignore (for relative path matching)
+
+    Returns:
+        True if file should be skipped, False otherwise
+    """
+    file_str = str(file_path)
+    file_name = file_path.name
+
+    # Check built-in skip patterns
+    for pattern in SKIP_PATTERNS:
+        # Check if pattern is in path (for directories like __pycache__)
+        if pattern in file_str:
+            return True
+        # Check if file ends with pattern (for extensions like .pyc)
+        if file_name.endswith(pattern):
+            return True
+
+    # Check gitignore patterns
+    if gitignore_patterns and gitignore_dir:
+        for pattern in gitignore_patterns:
+            if _matches_gitignore_pattern(file_path, pattern, gitignore_dir):
+                return True
+
+    return False
 
 
 @click.command("list-documents")
@@ -43,10 +184,10 @@ from gemini_file_search_tool.utils import (
 @click.option(
     "-v",
     "--verbose",
-    is_flag=True,
-    help="Enable verbose output",
+    count=True,
+    help="Enable verbose output (use -v for INFO, -vv for DEBUG, -vvv for TRACE)",
 )
-def list_documents(store_name: str, verbose: bool) -> None:
+def list_documents(store_name: str, verbose: int) -> None:
     """List all documents in a file search store.
 
     Example:
@@ -68,17 +209,29 @@ def list_documents(store_name: str, verbose: bool) -> None:
         sys.exit(1)
 
 
-def _expand_file_patterns(patterns: list[str], verbose: bool) -> list[Path]:
+def _expand_file_patterns(
+    patterns: list[str], verbose: bool | int, ignore_gitignore: bool = False
+) -> list[Path]:
     """Expand file patterns (including globs) to a list of file paths.
 
     Args:
         patterns: List of file patterns (can include globs)
         verbose: Whether to print verbose messages
+        ignore_gitignore: If True, skip gitignore pattern matching
 
     Returns:
         List of resolved file paths
     """
     all_files: list[Path] = []
+
+    # Load gitignore patterns if not ignoring
+    gitignore_patterns: list[str] = []
+    gitignore_dir: Path | None = None
+    if not ignore_gitignore:
+        gitignore_dir = Path.cwd()
+        gitignore_patterns = _load_gitignore_patterns(gitignore_dir)
+        if gitignore_patterns:
+            print_verbose(f"Loaded {len(gitignore_patterns)} patterns from .gitignore", verbose)
 
     for pattern in patterns:
         # Step 1: Expand environment variables
@@ -95,7 +248,11 @@ def _expand_file_patterns(patterns: list[str], verbose: bool) -> list[Path]:
         if not has_wildcards:
             # No wildcards - treat as direct file path
             file_path = Path(expanded).resolve()
-            if file_path.exists() and file_path.is_file():
+            if (
+                file_path.exists()
+                and file_path.is_file()
+                and not _should_skip_file(file_path, gitignore_patterns, gitignore_dir)
+            ):
                 all_files.append(file_path)
         else:
             # Has wildcards - split base dir and pattern
@@ -125,9 +282,20 @@ def _expand_file_patterns(patterns: list[str], verbose: bool) -> list[Path]:
                 found_files = list(base_dir.glob(glob_pattern))
                 print_verbose(f"Glob found {len(found_files)} items", verbose)
 
-                # Filter to only include files
+                # Filter to only include files (not directories)
                 found_files = [f for f in found_files if f.is_file()]
                 print_verbose(f"After filtering: {len(found_files)} files", verbose)
+
+                # Filter out system files and gitignore patterns
+                found_files = [
+                    f
+                    for f in found_files
+                    if not _should_skip_file(f, gitignore_patterns, gitignore_dir)
+                ]
+                print_verbose(
+                    f"After skipping system files and gitignore: {len(found_files)} files",
+                    verbose,
+                )
 
                 all_files.extend(found_files)
             except Exception as e:
@@ -136,7 +304,7 @@ def _expand_file_patterns(patterns: list[str], verbose: bool) -> list[Path]:
     return all_files
 
 
-def _fetch_existing_documents(store_name: str, verbose: bool) -> dict[str, dict[str, Any]]:
+def _fetch_existing_documents(store_name: str, verbose: bool | int) -> dict[str, dict[str, Any]]:
     """Fetch existing documents from a store for duplicate detection.
 
     Args:
@@ -233,13 +401,23 @@ def _fetch_existing_documents(store_name: str, verbose: bool) -> dict[str, dict[
 @click.option(
     "-v",
     "--verbose",
-    is_flag=True,
-    help="Enable verbose output (shows upload progress)",
+    count=True,
+    help="Enable verbose output (use -v for INFO, -vv for DEBUG, -vvv for TRACE)",
 )
 @click.option(
     "--skip-validation",
     is_flag=True,
     help="Skip file validation (size and base64 image checks)",
+)
+@click.option(
+    "--ignore-gitignore",
+    is_flag=True,
+    help="Ignore .gitignore patterns (upload all files matching glob)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show which files would be uploaded without actually uploading",
 )
 def upload(
     files: tuple[str, ...],
@@ -250,13 +428,17 @@ def upload(
     max_tokens: int,
     max_overlap: int,
     num_workers: int | None,
-    verbose: bool,
+    verbose: int,
     skip_validation: bool,
+    ignore_gitignore: bool,
+    dry_run: bool,
 ) -> None:
     """Upload file(s) to a file search store. Supports glob patterns.
 
     FILES can be file paths or glob patterns (*.pdf, docs/**/*.md).
     Automatically detects duplicates and skips unchanged files.
+    Respects .gitignore patterns by default (use --ignore-gitignore to disable).
+    Use -v/-vv/-vvv for progressive logging detail.
 
     Examples:
 
@@ -277,6 +459,18 @@ def upload(
         gemini-file-search-tool upload "docs/**/*.md" --store "documentation"
 
     \b
+        # Upload entire codebase for Code-RAG
+        gemini-file-search-tool upload "src/**/*.py" --store "my-codebase" -v
+
+    \b
+        # With verbose logging (see progress and errors)
+        gemini-file-search-tool upload "*.pdf" --store "papers" -v
+
+    \b
+        # With debug logging (see API operations)
+        gemini-file-search-tool upload "*.pdf" --store "papers" -vv
+
+    \b
         # With custom metadata
         gemini-file-search-tool upload paper.pdf --store "papers" \\
             --title "Research Paper 2024" --url "https://example.com/paper"
@@ -291,6 +485,14 @@ def upload(
         gemini-file-search-tool upload "*.txt" --store "notes" --skip-validation
 
     \b
+        # Ignore .gitignore patterns (upload all files)
+        gemini-file-search-tool upload "**/*" --store "everything" --ignore-gitignore
+
+    \b
+        # Dry-run to see which files would be uploaded
+        gemini-file-search-tool upload "**/*.py" --store "code" --dry-run -v
+
+    \b
     Output Format:
         Returns JSON array with status for each file:
         [
@@ -299,9 +501,15 @@ def upload(
           {"file": "old.pdf", "status": "updated", "document_name": "..."}
         ]
     """
+    # Setup logging based on verbosity level
+    setup_logging(verbose)
+    logger = get_logger(__name__)
+
     try:
+        logger.info("Starting upload operation")
+
         # Expand file patterns
-        files_to_upload = _expand_file_patterns(list(files), verbose)
+        files_to_upload = _expand_file_patterns(list(files), verbose, ignore_gitignore)
 
         if not files_to_upload:
             click.echo(
@@ -309,6 +517,20 @@ def upload(
                 err=True,
             )
             sys.exit(1)
+
+        # Dry-run mode: just show files and exit
+        if dry_run:
+            logger.info(f"DRY-RUN: Would upload {len(files_to_upload)} file(s)")
+            dry_run_results = [
+                {
+                    "file": str(f),
+                    "size_bytes": f.stat().st_size,
+                    "size_mb": round(f.stat().st_size / (1024 * 1024), 2),
+                }
+                for f in files_to_upload
+            ]
+            output_json(dry_run_results)
+            return
 
         # Normalize store name
         normalized_name = normalize_store_name(store_name)
@@ -407,7 +629,7 @@ def upload(
             ) as pbar:
 
                 def progress_callback(result: dict[str, Any]) -> None:
-                    nonlocal success_count, failure_count, updated_count
+                    nonlocal success_count, failure_count, updated_count, skipped_count
                     file_path = Path(result["file"])
 
                     if file_path in updated_files and result["status"] == "completed":
@@ -415,6 +637,8 @@ def upload(
                         updated_count += 1
                     elif result["status"] == "completed":
                         success_count += 1
+                    elif result["status"] == "skipped":
+                        skipped_count += 1
                     else:
                         failure_count += 1
 
@@ -444,8 +668,9 @@ def upload(
 
                 results.extend(upload_results)
 
-            # Exit with error if all uploads failed
-            if failure_count == len(files_to_actually_upload):
+            # Exit with error if all uploads failed (excluding skipped files like empty files)
+            successful_uploads = success_count + updated_count
+            if failure_count > 0 and successful_uploads == 0 and skipped_count == 0:
                 click.echo(
                     f"Error: All {len(files_to_actually_upload)} attempted upload(s) failed",
                     err=True,

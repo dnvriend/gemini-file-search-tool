@@ -1,7 +1,20 @@
 """Query operations for file search stores.
 
 This module provides functions for querying documents in Gemini file search stores
-using natural language with automatic citations.
+using natural language with automatic citations. Enables both traditional document
+RAG and Code-RAG (semantic code search).
+
+Key Features:
+- Natural language queries with contextual answers
+- Automatic source attribution and grounding metadata
+- Support for Flash (fast) and Pro (complex) models
+- Metadata filtering for targeted searches
+- Token usage tracking and cost estimation
+
+Code-RAG Use Case:
+Query uploaded codebases with natural language to understand architecture,
+find implementations, and discover patterns without manual code search.
+Perfect for codebase onboarding, architecture analysis, and AI coding assistants.
 
 Note: This code was generated with assistance from AI coding tools
 and has been reviewed and tested by a human.

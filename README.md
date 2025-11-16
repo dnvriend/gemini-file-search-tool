@@ -48,16 +48,43 @@ Whether you're building AI-powered document search, integrating RAG into agentic
 ## Use Cases
 
 - **📚 Knowledge Base Management**: Index documentation, research papers, wikis, and technical specifications into searchable stores for instant retrieval
-- **💻 Source Code Intelligence**: Upload entire codebases to query architecture decisions, find implementations, and understand code patterns using natural language
+- **💻 Code-RAG (Retrieval-Augmented Generation for Code)**: Upload entire codebases to enable semantic code search and natural language querying. Ask questions like "how does authentication work?", "where is error handling implemented?", or "explain the database architecture". Perfect for onboarding, code reviews, architecture discovery, and building AI coding assistants.
 - **🔍 Semantic Search**: Query your document stores with natural language questions and receive contextually relevant answers with automatic citation
 - **🎯 RAG Applications**: Build production-ready retrieval-augmented generation systems with JSON-formatted responses including grounding metadata and source attribution
+
+### Code-RAG Example
+
+Upload a codebase and query it with natural language:
+
+```bash
+# Upload your entire codebase
+gemini-file-search-tool upload "src/**/*.py" --store "my-project-code" -v
+
+# Query with natural language
+gemini-file-search-tool query --store "my-project-code" \
+  --prompt "How does the authentication system work?" \
+  --show-cost -v
+
+# Ask architectural questions
+gemini-file-search-tool query --store "my-project-code" \
+  --prompt "What design patterns are used in this codebase?" \
+  --pro
+
+# Find implementations
+gemini-file-search-tool query --store "my-project-code" \
+  --prompt "Where is error handling for API calls implemented?"
+```
+
+**Meta Note**: This tool itself was built using Code-RAG! We uploaded the codebase to a Gemini File Search store and used it to answer questions during development. The tool enables the very functionality it provides.
 
 ## Features
 
 - ✅ **Fully Managed RAG**: Automatic chunking, embeddings, and retrieval without infrastructure management
 - ✅ **Multi-Format Support**: PDF, DOCX, TXT, JSON, CSV, HTML, and source code files
+- ✅ **Code-RAG Enabled**: Upload codebases and query with natural language for semantic code search
 - ✅ **Natural Language Queries**: Ask questions in plain language and get contextual answers
 - ✅ **Automatic Citations**: Built-in source attribution and grounding metadata
+- ✅ **Multi-Level Verbosity**: Progressive logging detail with `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
 - ✅ **Cost Tracking**: Token usage monitoring and cost estimation for query operations
 - ✅ **Composable CLI**: JSON output for easy integration with other tools and scripts
 - ✅ **Python Library**: Import and use programmatically in your applications
@@ -218,8 +245,29 @@ gemini-file-search-tool upload document.pdf --store "my-documents" \
   --max-tokens 300 \
   --max-overlap 25
 
+# Upload respecting .gitignore (default behavior)
+gemini-file-search-tool upload "**/*.py" --store "my-codebase" -v
+
+# Upload ignoring .gitignore patterns
+gemini-file-search-tool upload "**/*.py" --store "my-codebase" --ignore-gitignore
+
+# Dry-run to preview files before uploading
+gemini-file-search-tool upload "**/*.py" --store "my-codebase" --dry-run -v
+
+# Upload with verbose logging (see what's happening)
+gemini-file-search-tool upload "*.pdf" --store "my-documents" -v
+
+# Upload with debug logging (see detailed operations)
+gemini-file-search-tool upload "*.pdf" --store "my-documents" -vv
+
+# Upload with trace logging (see full API calls)
+gemini-file-search-tool upload "*.pdf" --store "my-documents" -vvv
+
 # List documents in a store
 gemini-file-search-tool list-documents --store "my-documents"
+
+# List documents with verbose output
+gemini-file-search-tool list-documents --store "my-documents" -v
 ```
 
 ### Querying
@@ -242,7 +290,17 @@ gemini-file-search-tool query --store "my-documents" \
 # Query with cost tracking and verbose output
 gemini-file-search-tool query --store "my-documents" \
   --prompt "Explain the methodology" \
-  --show-cost --verbose
+  --show-cost -v
+
+# Query with debug logging (see API operations)
+gemini-file-search-tool query --store "my-documents" \
+  --prompt "What are the findings?" \
+  --show-cost -vv
+
+# Query with trace logging (see full HTTP requests)
+gemini-file-search-tool query --store "my-documents" \
+  --prompt "Analyze this" \
+  --show-cost -vvv
 ```
 
 ### Cost Tracking
@@ -297,6 +355,113 @@ gemini-file-search-tool query --store "my-documents" \
 - Token usage is only available for query operations
 - Upload costs (document embedding) are not tracked by the API
 - Cost estimates are calculated locally using published pricing
+
+### Upload Features
+
+**Automatic File Validation**:
+- **Empty Files**: 0-byte files automatically skipped with warning
+- **File Size**: 50MB limit enforced
+- **Base64 Images**: Detects base64-encoded images in text files (can cause upload failures)
+- **System Files**: Auto-skips `__pycache__`, `.pyc`, `.DS_Store`, etc.
+- **Gitignore Support**: Automatically respects `.gitignore` patterns (use `--ignore-gitignore` to disable)
+- **MIME Types**: Automatic registration for `.toml`, `.env`, `.txt`, `.md` files
+
+**Duplicate Detection**:
+- Automatically detects existing files by name and size
+- Skips unchanged files (no re-upload)
+- Updates files when size changes (deletes old, uploads new)
+
+**Preview & Control**:
+- **Dry-Run**: Use `--dry-run` to preview which files would be uploaded without actually uploading
+- **Skip Validation**: Use `--skip-validation` to bypass checks for faster uploads
+- **Ignore Gitignore**: Use `--ignore-gitignore` to upload files normally excluded by .gitignore
+
+### Dry-Run Mode
+
+Preview which files would be uploaded without actually uploading:
+
+```bash
+# Preview files with sizes
+gemini-file-search-tool upload "**/*.py" --store "code" --dry-run -v
+
+# Output (to stderr):
+# [INFO] Loaded 38 patterns from .gitignore
+# [INFO] DRY-RUN: Would upload 13 file(s)
+
+# Output (to stdout - JSON):
+[
+  {
+    "file": "/path/to/file1.py",
+    "size_bytes": 1809,
+    "size_mb": 0.0
+  },
+  {
+    "file": "/path/to/file2.py",
+    "size_bytes": 2691,
+    "size_mb": 0.0
+  }
+]
+```
+
+**Benefits**:
+- **Preview Files**: See exactly which files match your glob pattern
+- **Verify Gitignore**: Confirm .gitignore filtering is working correctly
+- **Check Sizes**: Review file sizes before uploading
+- **No API Calls**: Completely safe, no interaction with Gemini API
+
+### Verbosity Levels
+
+All commands support multi-level verbosity for controlling log output detail:
+
+| Flag | Level | Description | Use Case |
+|------|-------|-------------|----------|
+| (none) | WARNING | Only critical errors | Production, clean output |
+| `-v` | INFO | High-level operations | See progress, identify failures |
+| `-vv` | DEBUG | Detailed operations | Debug issues, see API calls |
+| `-vvv` | TRACE | Full API details | Deep debugging, HTTP traces |
+
+**Examples:**
+
+```bash
+# INFO level: See which files are uploaded/failed
+gemini-file-search-tool upload "*.pdf" --store "docs" -v
+
+# DEBUG level: See validation, polling, API operations
+gemini-file-search-tool upload "*.pdf" --store "docs" -vv
+
+# TRACE level: See full HTTP requests/responses from SDK
+gemini-file-search-tool upload "*.pdf" --store "docs" -vvv
+```
+
+**Output:**
+
+```bash
+# With -v (INFO)
+[INFO] Starting upload operation
+[INFO] Uploading: document.pdf (2.50MB) to store 'fileSearchStores/docs-123'
+[INFO] Upload completed successfully: document.pdf
+
+# With -vv (DEBUG)
+[INFO] Starting upload operation
+[INFO] Uploading: document.pdf (2.50MB) to store 'fileSearchStores/docs-123'
+[DEBUG] Validating file: document.pdf
+[DEBUG] File validation passed: document.pdf
+[DEBUG] Starting upload operation for: document.pdf
+[DEBUG] Operation started: operations/upload-abc123
+[DEBUG] Polling operation operations/upload-abc123 (attempt 1) - waiting 2.0s
+[DEBUG] Polling operation operations/upload-abc123 (attempt 2) - waiting 3.0s
+[INFO] Upload completed successfully: document.pdf
+
+# With -vvv (TRACE) - includes all above plus:
+[DEBUG] (httpx) HTTP Request: POST https://...
+[DEBUG] (httpx) HTTP Response: 200 OK
+```
+
+**Benefits:**
+- **Real-time Feedback**: See progress and failures as they happen (not just in final JSON)
+- **Progressive Detail**: Choose the right level of verbosity for your needs
+- **Clean stdout**: All logs go to stderr, keeping JSON output clean for piping
+- **Library Logging**: At `-vvv`, see internals from `httpx`, `google-api-core`, etc.
 
 ### Library Usage
 
