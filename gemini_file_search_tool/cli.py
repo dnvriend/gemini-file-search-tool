@@ -47,9 +47,9 @@ def cli() -> None:
     \b
     Examples:
       gemini-file-search-tool list-stores
-      gemini-file-search-tool create-store --name "research-papers"
+      gemini-file-search-tool create-store "research-papers"
       gemini-file-search-tool upload "*.pdf" --store "research-papers"
-      gemini-file-search-tool query --store "research-papers" --prompt "Summarize key findings"
+      gemini-file-search-tool query "Summarize key findings" --store "research-papers"
 
     \b
     For detailed help on each command:

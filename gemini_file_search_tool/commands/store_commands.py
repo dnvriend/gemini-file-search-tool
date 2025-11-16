@@ -39,11 +39,7 @@ from gemini_file_search_tool.utils import (
 
 
 @click.command("create-store")
-@click.option(
-    "--name",
-    required=True,
-    help="Display name for the file search store",
-)
+@click.argument("name", required=True)
 @click.option(
     "-v",
     "--verbose",
@@ -53,15 +49,17 @@ from gemini_file_search_tool.utils import (
 def create_store(name: str, verbose: bool) -> None:
     """Create a new file search store.
 
+    NAME is the display name for the file search store (positional argument).
+
     Examples:
 
     \b
         # Create a store
-        gemini-file-search-tool create-store --name "research-papers"
+        gemini-file-search-tool create-store "research-papers"
 
     \b
         # Create with verbose output
-        gemini-file-search-tool create-store --name "my-docs" -v
+        gemini-file-search-tool create-store "my-docs" -v
     """
     try:
         print_verbose(f"Creating file search store: {name}", verbose)
@@ -105,13 +103,7 @@ def list_stores(verbose: bool) -> None:
 
 
 @click.command("get-store")
-@click.option(
-    "--store-name",
-    "--store",
-    "store_name",
-    required=True,
-    help="Store name/ID (accepts both full resource names or just IDs)",
-)
+@click.argument("store_name", required=True)
 @click.option(
     "-v",
     "--verbose",
@@ -121,15 +113,18 @@ def list_stores(verbose: bool) -> None:
 def get_store(store_name: str, verbose: bool) -> None:
     """Get details of a specific file search store.
 
+    STORE_NAME is the store name/ID (positional argument).
+    Accepts both display names and full resource names.
+
     Examples:
 
     \b
         # Get by display name
-        gemini-file-search-tool get-store --store "research-papers"
+        gemini-file-search-tool get-store "research-papers"
 
     \b
         # Get by resource name
-        gemini-file-search-tool get-store --store "fileSearchStores/abc123"
+        gemini-file-search-tool get-store "fileSearchStores/abc123"
     """
     try:
         normalized_name = normalize_store_name(store_name)
@@ -152,13 +147,7 @@ def get_store(store_name: str, verbose: bool) -> None:
 
 
 @click.command("update-store")
-@click.option(
-    "--store-name",
-    "--store",
-    "store_name",
-    required=True,
-    help="Store name/ID (accepts both full resource names or just IDs)",
-)
+@click.argument("store_name", required=True)
 @click.option(
     "--display-name",
     required=True,
@@ -173,11 +162,13 @@ def get_store(store_name: str, verbose: bool) -> None:
 def update_store(store_name: str, display_name: str, verbose: bool) -> None:
     """Update a file search store's display name.
 
+    STORE_NAME is the store name/ID (positional argument).
+
     Example:
 
     \b
         # Rename a store
-        gemini-file-search-tool update-store --store "old-name" \\
+        gemini-file-search-tool update-store "old-name" \\
             --display-name "new-name"
     """
     try:
@@ -198,13 +189,7 @@ def update_store(store_name: str, display_name: str, verbose: bool) -> None:
 
 
 @click.command("delete-store")
-@click.option(
-    "--store-name",
-    "--store",
-    "store_name",
-    required=True,
-    help="Store name/ID (accepts both full resource names or just IDs)",
-)
+@click.argument("store_name", required=True)
 @click.option(
     "--force",
     is_flag=True,
@@ -219,15 +204,17 @@ def update_store(store_name: str, display_name: str, verbose: bool) -> None:
 def delete_store(store_name: str, force: bool, verbose: bool) -> None:
     """Delete a file search store.
 
+    STORE_NAME is the store name/ID (positional argument).
+
     Examples:
 
     \b
         # Delete with confirmation prompt
-        gemini-file-search-tool delete-store --store "old-store"
+        gemini-file-search-tool delete-store "old-store"
 
     \b
         # Force deletion without prompt
-        gemini-file-search-tool delete-store --store "old-store" --force
+        gemini-file-search-tool delete-store "old-store" --force
     """
     try:
         normalized_name = normalize_store_name(store_name)

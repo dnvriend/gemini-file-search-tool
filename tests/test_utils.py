@@ -6,7 +6,12 @@ and has been reviewed and tested by a human.
 
 import pytest
 
-from gemini_file_search_tool.utils import estimate_cost, normalize_store_name, output_json
+from gemini_file_search_tool.utils import (
+    aggregate_costs,
+    estimate_cost,
+    normalize_store_name,
+    output_json,
+)
 
 
 def test_normalize_store_name_full_resource() -> None:
@@ -102,6 +107,17 @@ def test_estimate_cost_zero_tokens() -> None:
     assert result["total_cost_usd"] == 0.0
 
 
+def test_estimate_cost_none_token_counts() -> None:
+    """Test cost estimation with None token counts (treats as zero)."""
+    usage = {"prompt_token_count": 100, "candidates_token_count": None, "total_token_count": 100}
+    result = estimate_cost(usage, "gemini-2.5-flash")
+
+    assert result is not None
+    assert result["input_cost_usd"] == 0.0000075  # 100 / 1M * 0.075
+    assert result["output_cost_usd"] == 0.0  # None treated as 0
+    assert result["total_cost_usd"] == 0.0000075
+
+
 def test_output_json_no_scientific_notation(capsys: object) -> None:
     """Test that output_json formats small floats without scientific notation."""
     import json
@@ -127,3 +143,71 @@ def test_output_json_no_scientific_notation(capsys: object) -> None:
     assert parsed["large_cost"] == pytest.approx(123.456)
     assert parsed["nested"]["small_value"] == pytest.approx(8.58e-05)
     assert parsed["nested"]["normal_value"] == 42
+
+
+def test_aggregate_costs_both_costs() -> None:
+    """Test aggregating enhancement and query costs."""
+    enhancement_cost = {
+        "input_cost_usd": 0.00000375,
+        "output_cost_usd": 0.000024,
+        "total_cost_usd": 0.00002775,
+        "model": "gemini-2.5-flash",
+    }
+
+    query_cost = {
+        "input_cost_usd": 0.00001125,
+        "output_cost_usd": 0.000096,
+        "total_cost_usd": 0.00010725,
+        "model": "gemini-2.5-flash",
+    }
+
+    result = aggregate_costs(enhancement_cost, query_cost)
+
+    assert result["currency"] == "USD"
+    assert result["enhancement"] == enhancement_cost
+    assert result["query"] == query_cost
+    assert result["total_cost_usd"] == pytest.approx(0.000135, rel=1e-6)
+
+
+def test_aggregate_costs_enhancement_only() -> None:
+    """Test aggregating with only enhancement cost."""
+    enhancement_cost = {
+        "input_cost_usd": 0.00000375,
+        "output_cost_usd": 0.000024,
+        "total_cost_usd": 0.00002775,
+        "model": "gemini-2.5-flash",
+    }
+
+    result = aggregate_costs(enhancement_cost, None)
+
+    assert result["currency"] == "USD"
+    assert result["enhancement"] == enhancement_cost
+    assert "query" not in result
+    assert result["total_cost_usd"] == pytest.approx(0.00002775, rel=1e-6)
+
+
+def test_aggregate_costs_query_only() -> None:
+    """Test aggregating with only query cost."""
+    query_cost = {
+        "input_cost_usd": 0.00001125,
+        "output_cost_usd": 0.000096,
+        "total_cost_usd": 0.00010725,
+        "model": "gemini-2.5-flash",
+    }
+
+    result = aggregate_costs(None, query_cost)
+
+    assert result["currency"] == "USD"
+    assert "enhancement" not in result
+    assert result["query"] == query_cost
+    assert result["total_cost_usd"] == pytest.approx(0.00010725, rel=1e-6)
+
+
+def test_aggregate_costs_neither() -> None:
+    """Test aggregating with no costs."""
+    result = aggregate_costs(None, None)
+
+    assert result["currency"] == "USD"
+    assert "enhancement" not in result
+    assert "query" not in result
+    assert result["total_cost_usd"] == 0.0

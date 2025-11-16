@@ -18,12 +18,17 @@ gemini_file_search_tool/
 │   ├── client.py           # Gemini API client management
 │   ├── stores.py           # Store CRUD operations
 │   ├── documents.py        # Document operations (list, upload)
-│   └── query.py            # Query operations
+│   ├── query.py            # Query operations
+│   └── query_enhancement.py # Query enhancement engine (NEW)
+├── prompts/                 # Enhancement prompt templates (NEW)
+│   ├── generic_rag.py      # Generic RAG optimization template
+│   ├── code_rag.py         # Code-specific optimization template
+│   └── obsidian.py         # Obsidian/PKM optimization template
 ├── commands/                # CLI command implementations
 │   ├── store_commands.py   # Store management commands
 │   ├── document_commands.py # Document management commands
-│   └── query_commands.py   # Query commands
-└── utils.py                 # Shared utilities (normalize_store_name, output_json, etc.)
+│   └── query_commands.py   # Query commands (with enhancement integration)
+└── utils.py                 # Shared utilities (normalize_store_name, output_json, aggregate_costs, etc.)
 ```
 
 ### Key Design Principles
@@ -43,7 +48,7 @@ make install
 
 # Run locally during development
 uv run gemini-file-search-tool --help
-uv run gemini-file-search-tool create-store --name "test"
+uv run gemini-file-search-tool create-store "test"
 uv run gemini-file-search-tool upload "*.pdf" --store "test"
 
 # Or use make run
@@ -85,11 +90,11 @@ make clean          # Remove build artifacts and caches
 ## CLI Commands
 
 ### Store Commands (store_commands.py)
-- `create-store --name NAME` - Create new store
+- `create-store NAME` - Create new store
 - `list-stores` - List all stores
-- `get-store --store NAME` - Get store details
-- `update-store --store NAME --display-name NAME` - Update store
-- `delete-store --store NAME [--force]` - Delete store
+- `get-store NAME` - Get store details
+- `update-store NAME --display-name NAME` - Update store
+- `delete-store NAME [--force]` - Delete store
 
 ### Document Commands (document_commands.py)
 - `list-documents --store NAME [-v|-vv|-vvv]` - List documents in store
@@ -106,11 +111,19 @@ make clean          # Remove build artifacts and caches
   - **MIME-Type Support**: Registers `.toml`, `.env` files automatically
 
 ### Query Commands (query_commands.py)
-- `query --store NAME --prompt TEXT [--pro] [--metadata-filter FILTER] [--show-cost] [-v|-vv|-vvv]` - Query documents
-  - **Note**: `--show-cost` includes cost estimation in JSON output
-  - **Verbosity**: `-v` displays token usage and cost info to stderr, `-vv` shows API operations, `-vvv` shows full HTTP traces
-  - Automatically tracks token usage (prompt, candidates, total)
-  - Estimates costs using current Gemini API pricing
+- `query PROMPT --store NAME [OPTIONS]` - Query documents with optional enhancement
+  - **PROMPT**: First positional argument - the query text
+  - **Enhancement Mode**: `--enhance-mode {generic|code-rag|obsidian}` - Query optimization strategy
+    - `generic` - Generic RAG optimization for better document retrieval
+    - `code-rag` - Code-specific optimization for semantic code search
+    - `obsidian` - Obsidian/PKM optimization for personal knowledge bases
+  - **Enhancement Model**: `--enhancement-model {flash|pro}` - Model for enhancement (default: flash)
+  - **Query Model**: `--query-model {flash|pro}` - Model for RAG query (default: flash)
+  - **Observability**: `--show-enhancement` displays enhanced query, `--dry-run-enhancement` previews without executing
+  - **Cost Tracking**: `--show-cost` includes separate costs for enhancement + query
+  - **Verbosity**: `-v` displays token usage and cost info, `-vv` shows API operations, `-vvv` shows HTTP traces
+  - **Metadata Filtering**: `--metadata-filter "key=value"` - Filter documents by metadata
+  - **Grounding**: `--query-grounding-metadata` - Include source citations in response
 
 ## Library Usage
 
@@ -141,6 +154,98 @@ uv run pytest tests/ -v
 uv run pytest tests/ --cov=gemini_file_search_tool
 ```
 
+## Query Enhancement
+
+Query enhancement uses Gemini LLM to optimize user queries before RAG retrieval. **However, comprehensive benchmarks show that enhancement is counterproductive for most use cases.**
+
+### ⚠️ Important: Enhancement is Disabled by Default
+
+**Benchmark Results** (30 queries, 6 configurations):
+- **None + Flash**: Quality 97.7/100, Cost $0.000125/query, Success 100% → Value: 156.1
+- **Flash + Flash**: Quality 90.0/100, Cost $0.000758/query, Success 80% → Value: 23.7 (6.6x worse)
+- **Pro Enhancement**: Quality 60-80/100, Cost $0.001-0.002/query, Success 20-60% → Value: 5.5-6.0 (28x worse)
+
+**Key Findings:**
+1. **Simple queries work best** - RAG relies on semantic similarity. Over-specifying queries with technical jargon that may not exist in documentation harms retrieval.
+2. **Enhancement introduces risk** - Forces models to add detail, leading to over-specification and potential hallucination (especially with Pro).
+3. **Flash is ideal for RAG** - 12x more cost-efficient than Pro, safer (sticks to facts), perfectly adequate for semantic matching.
+
+**Reference**: Lewis et al., 2020. "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" (https://arxiv.org/abs/2005.11401)
+
+See `references/benchmark-model-comparison-2025-11-16.md` and `references/rag-query-enhancement-analysis-2025-11-16.md` for detailed analysis.
+
+### Enhancement Modes (Use Sparingly)
+
+Enhancement should **only** be used for:
+- Vague or poorly worded queries ("authentication stuff", "that database thing")
+- Exploratory queries where you're unsure what you're looking for
+- Cases where simple queries consistently fail to retrieve relevant documents
+
+1. **Generic RAG** (`--enhance-mode generic`)
+   - Optimizes queries for general document retrieval
+   - Adds specificity, domain terminology, and explicit source attribution
+   - Best for: Research papers, documentation, general knowledge bases
+
+2. **Code-RAG** (`--enhance-mode code-rag`)
+   - Optimizes for semantic code search
+   - Requests file paths, function names, line numbers, and dependencies
+   - Best for: Codebase exploration, architecture discovery, implementation finding
+   - **Warning**: Can make queries too specific, reducing success rates
+
+3. **Obsidian** (`--enhance-mode obsidian`)
+   - Optimizes for personal knowledge management systems
+   - Considers atomic notes, backlinks, tags, and personal terminology
+   - Best for: Personal notes, Zettelkasten, PKM systems
+
+### Model Selection
+
+- **Flash (default)**: Fast, cost-effective, suitable for 95% of queries (~$0.00003 per enhancement)
+- **Pro** (`--enhancement-model pro`): More sophisticated reasoning but 15x more expensive (~$0.0005 per enhancement) and prone to hallucination
+
+### Cost Tracking
+
+When using `--show-cost`, the output includes separate cost breakdowns:
+```json
+{
+  "estimated_cost": {
+    "enhancement": {
+      "input_cost_usd": 0.00000375,
+      "output_cost_usd": 0.000024,
+      "total_cost_usd": 0.00002775,
+      "model": "gemini-2.5-flash"
+    },
+    "query": {
+      "input_cost_usd": 0.00001125,
+      "output_cost_usd": 0.000096,
+      "total_cost_usd": 0.00010725,
+      "model": "gemini-2.5-flash"
+    },
+    "total_cost_usd": 0.000135,
+    "currency": "USD"
+  }
+}
+```
+
+### Recommended Usage
+
+```bash
+# ✅ Recommended: No enhancement (best value, highest quality)
+gemini-file-search-tool query "How does authentication work?" \
+  --store "docs" --show-cost -v
+
+# ✅ With grounding metadata (verify sources)
+gemini-file-search-tool query "Explain the architecture" \
+  --store "docs" --query-grounding-metadata --show-cost -v
+
+# ⚠️ Use enhancement ONLY for vague queries
+gemini-file-search-tool query "authentication stuff" \
+  --store "docs" --enhance-mode code-rag --show-enhancement
+
+# Preview enhancement without executing query
+gemini-file-search-tool query "database schema" \
+  --store "docs" --enhance-mode generic --dry-run-enhancement
+```
+
 ## Code-RAG Capability
 
 This tool enables **Code-RAG (Retrieval-Augmented Generation for Code)** - the ability to upload entire codebases and query them with natural language. This is powerful for:
@@ -157,12 +262,12 @@ This tool enables **Code-RAG (Retrieval-Augmented Generation for Code)** - the a
 gemini-file-search-tool upload "src/**/*.py" --store "my-project" -v
 
 # Query with natural language
-gemini-file-search-tool query --store "my-project" \
-  --prompt "How does the authentication system work?" -v
+gemini-file-search-tool query "How does the authentication system work?" \
+  --store "my-project" -v
 
 # Ask architectural questions
-gemini-file-search-tool query --store "my-project" \
-  --prompt "What design patterns are used?" --pro
+gemini-file-search-tool query "What design patterns are used?" \
+  --store "my-project" --query-model pro
 ```
 
 **Meta Note**: This tool itself was built using Code-RAG! During development, we uploaded the codebase to a Gemini File Search store and queried it to understand implementation details, find bugs, and plan features. The tool enables the very functionality it provides.
@@ -231,11 +336,11 @@ The tool includes built-in cost tracking for query operations:
 
 ```bash
 # View token usage (verbose mode)
-gemini-file-search-tool query --store "test" --prompt "What is this?" --verbose
+gemini-file-search-tool query "What is this?" --store "test" -v
 # Output to stderr: [INFO] Token usage: 150 prompt + 320 candidates = 470 total
 
 # Show estimated cost
-gemini-file-search-tool query --store "test" --prompt "What is this?" --show-cost --verbose
+gemini-file-search-tool query "What is this?" --store "test" --show-cost -v
 # Output to stderr:
 # [INFO] Token usage: 150 prompt + 320 candidates = 470 total
 # [INFO] Estimated cost: $0.00010725 USD

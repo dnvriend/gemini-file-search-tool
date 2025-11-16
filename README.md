@@ -61,18 +61,16 @@ Upload a codebase and query it with natural language:
 gemini-file-search-tool upload "src/**/*.py" --store "my-project-code" -v
 
 # Query with natural language
-gemini-file-search-tool query --store "my-project-code" \
-  --prompt "How does the authentication system work?" \
-  --show-cost -v
+gemini-file-search-tool query "How does the authentication system work?" \
+  --store "my-project-code" --show-cost -v
 
 # Ask architectural questions
-gemini-file-search-tool query --store "my-project-code" \
-  --prompt "What design patterns are used in this codebase?" \
-  --pro
+gemini-file-search-tool query "What design patterns are used in this codebase?" \
+  --store "my-project-code" --query-model pro
 
 # Find implementations
-gemini-file-search-tool query --store "my-project-code" \
-  --prompt "Where is error handling for API calls implemented?"
+gemini-file-search-tool query "Where is error handling for API calls implemented?" \
+  --store "my-project-code"
 ```
 
 **Meta Note**: This tool itself was built using Code-RAG! We uploaded the codebase to a Gemini File Search store and used it to answer questions during development. The tool enables the very functionality it provides.
@@ -82,10 +80,11 @@ gemini-file-search-tool query --store "my-project-code" \
 - ✅ **Fully Managed RAG**: Automatic chunking, embeddings, and retrieval without infrastructure management
 - ✅ **Multi-Format Support**: PDF, DOCX, TXT, JSON, CSV, HTML, and source code files
 - ✅ **Code-RAG Enabled**: Upload codebases and query with natural language for semantic code search
+- ✅ **Query Enhancement**: LLM-powered query optimization for better RAG retrieval (generic, code-rag, obsidian modes)
 - ✅ **Natural Language Queries**: Ask questions in plain language and get contextual answers
 - ✅ **Automatic Citations**: Built-in source attribution and grounding metadata
 - ✅ **Multi-Level Verbosity**: Progressive logging detail with `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
-- ✅ **Cost Tracking**: Token usage monitoring and cost estimation for query operations
+- ✅ **Cost Tracking**: Token usage monitoring and cost estimation for both enhancement and query operations
 - ✅ **Composable CLI**: JSON output for easy integration with other tools and scripts
 - ✅ **Python Library**: Import and use programmatically in your applications
 - ✅ **Type-Safe**: Strict mypy type checking and modern Python 3.14+ syntax
@@ -208,19 +207,19 @@ gemini-file-search-tool upload --help
 
 ```bash
 # Create a new store
-gemini-file-search-tool create-store --name "my-documents"
+gemini-file-search-tool create-store "my-documents"
 
 # List all stores
 gemini-file-search-tool list-stores
 
 # Get store details
-gemini-file-search-tool get-store --store "my-documents"
+gemini-file-search-tool get-store "my-documents"
 
 # Update store display name
-gemini-file-search-tool update-store --store "my-documents" --display-name "My Documents 2024"
+gemini-file-search-tool update-store "my-documents" --display-name "My Documents 2024"
 
 # Delete a store
-gemini-file-search-tool delete-store --store "my-documents" --force
+gemini-file-search-tool delete-store "my-documents" --force
 ```
 
 ### Document Management
@@ -272,36 +271,60 @@ gemini-file-search-tool list-documents --store "my-documents" -v
 
 ### Querying
 
-```bash
-# Basic query
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "What are the key findings?"
+**⚡ Recommended Configuration (Based on Benchmarks)**
 
-# Query with Pro model
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "Analyze the technical architecture" \
-  --pro
+For optimal cost-quality balance, use the default configuration with no enhancement:
+
+```bash
+# Recommended: No enhancement + Flash model (best value)
+gemini-file-search-tool query "What are the key findings?" \
+  --store "my-documents"
+
+# With cost tracking and grounding metadata
+gemini-file-search-tool query "Explain the methodology" \
+  --store "my-documents" --show-cost --query-grounding-metadata -v
+```
+
+**Performance Benchmarks** (30 queries across 6 configurations):
+- **Quality Score**: 97.7/100
+- **Cost**: ~$0.00013 per query
+- **Success Rate**: 100% (vs 20-80% with enhancement)
+- **Value**: 156.1 quality points per $0.001 (6.6x better than enhancement)
+
+See `references/benchmark-model-comparison-2025-11-16.md` for detailed analysis.
+
+**Other Query Options:**
+
+```bash
+# Query with Pro model (complex analytical questions)
+gemini-file-search-tool query "Analyze the technical architecture" \
+  --store "my-documents" --query-model pro
 
 # Query with metadata filter
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "Tell me about the book" \
-  --metadata-filter "author=Robert Graves"
+gemini-file-search-tool query "Tell me about the book" \
+  --store "my-documents" --metadata-filter "author=Robert Graves"
 
-# Query with cost tracking and verbose output
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "Explain the methodology" \
-  --show-cost -v
+# Query with enhancement (only for vague/exploratory queries)
+gemini-file-search-tool query "authentication stuff" \
+  --store "my-documents" --enhance-mode code-rag --show-enhancement
 
 # Query with debug logging (see API operations)
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "What are the findings?" \
-  --show-cost -vv
+gemini-file-search-tool query "What are the findings?" \
+  --store "my-documents" --show-cost -vv
 
 # Query with trace logging (see full HTTP requests)
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "Analyze this" \
-  --show-cost -vvv
+gemini-file-search-tool query "Analyze this" \
+  --store "my-documents" --show-cost -vvv
 ```
+
+**⚠️ Query Enhancement Notes:**
+
+Based on comprehensive benchmarks, **query enhancement is disabled by default** and should only be used for:
+- Vague or poorly worded queries ("authentication stuff", "that database thing")
+- Exploratory queries where you're unsure what you're looking for
+- Cases where simple queries consistently fail to retrieve relevant documents
+
+**Why?** Enhancement makes queries too specific, reducing retrieval success rates from 100% to 20-80%. Simple, natural language queries work best for RAG systems (see [Lewis et al., 2020](https://arxiv.org/abs/2005.11401)).
 
 ### Cost Tracking
 
@@ -309,15 +332,15 @@ The CLI automatically tracks token usage for query operations and can estimate c
 
 ```bash
 # View token usage (verbose mode)
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "What is this about?" --verbose
+gemini-file-search-tool query "What is this about?" \
+  --store "my-documents" -v
 
 # Output:
 # [INFO] Token usage: 150 prompt + 320 candidates = 470 total
 
 # Show estimated cost
-gemini-file-search-tool query --store "my-documents" \
-  --prompt "What is this about?" --show-cost --verbose
+gemini-file-search-tool query "What is this about?" \
+  --store "my-documents" --show-cost -v
 
 # Output:
 # [INFO] Token usage: 150 prompt + 320 candidates = 470 total

@@ -179,8 +179,8 @@ def estimate_cost(usage_metadata: dict[str, int] | None, model: str) -> dict[str
                 f"Unknown model '{model}'. Supported models: {', '.join(pricing.keys())}"
             )
 
-    prompt_tokens = usage_metadata.get("prompt_token_count", 0)
-    candidates_tokens = usage_metadata.get("candidates_token_count", 0)
+    prompt_tokens = usage_metadata.get("prompt_token_count", 0) or 0
+    candidates_tokens = usage_metadata.get("candidates_token_count", 0) or 0
 
     input_cost = (prompt_tokens / 1_000_000) * pricing[model_key]["input"]
     output_cost = (candidates_tokens / 1_000_000) * pricing[model_key]["output"]
@@ -193,3 +193,53 @@ def estimate_cost(usage_metadata: dict[str, int] | None, model: str) -> dict[str
         "model": model_key,
         "note": "Estimated cost based on current pricing. Subject to change.",
     }
+
+
+def aggregate_costs(
+    enhancement_cost: dict[str, Any] | None, query_cost: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Aggregate enhancement and query costs for comprehensive cost tracking.
+
+    Args:
+        enhancement_cost: Cost estimate from query enhancement operation
+        query_cost: Cost estimate from RAG query operation
+
+    Returns:
+        Dictionary with aggregated costs:
+            - enhancement: Enhancement cost breakdown (if available)
+            - query: Query cost breakdown (if available)
+            - total_cost_usd: Sum of all costs
+            - currency: 'USD'
+
+    Example:
+        {
+            "enhancement": {
+                "input_cost_usd": 0.00000375,
+                "output_cost_usd": 0.000024,
+                "total_cost_usd": 0.00002775,
+                "model": "gemini-2.5-flash"
+            },
+            "query": {
+                "input_cost_usd": 0.00001125,
+                "output_cost_usd": 0.000096,
+                "total_cost_usd": 0.00010725,
+                "model": "gemini-2.5-flash"
+            },
+            "total_cost_usd": 0.000135,
+            "currency": "USD"
+        }
+    """
+    result: dict[str, Any] = {"currency": "USD"}
+    total = 0.0
+
+    if enhancement_cost:
+        result["enhancement"] = enhancement_cost
+        total += enhancement_cost.get("total_cost_usd", 0.0)
+
+    if query_cost:
+        result["query"] = query_cost
+        total += query_cost.get("total_cost_usd", 0.0)
+
+    result["total_cost_usd"] = total
+
+    return result
