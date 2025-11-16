@@ -1,5 +1,10 @@
 # gemini-file-search-tool
 
+<div align="center">
+  <img src="rag-icon.png" alt="RAG Icon" width="200" />
+  <br>
+  <br>
+
 [![Python Version](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -7,7 +12,9 @@
 [![AI Generated](https://img.shields.io/badge/AI-Generated-blueviolet.svg)](https://www.anthropic.com/claude)
 [![Built with Claude Code](https://img.shields.io/badge/Built_with-Claude_Code-5A67D8.svg)](https://www.anthropic.com/claude/code)
 
-Gemini File Search Tool
+**Gemini File Search Tool** - Production-ready CLI & Python library for Google's fully managed RAG system
+
+</div>
 
 ## Table of Contents
 
