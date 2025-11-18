@@ -16,6 +16,7 @@ import click
 import requests
 from tqdm import tqdm
 
+from gemini_file_search_tool.core.cache import CacheManager
 from gemini_file_search_tool.core.client import MissingConfigurationError
 from gemini_file_search_tool.core.documents import (
     DocumentError,
@@ -419,6 +420,11 @@ def _fetch_existing_documents(store_name: str, verbose: bool | int) -> dict[str,
     is_flag=True,
     help="Show which files would be uploaded without actually uploading",
 )
+@click.option(
+    "--rebuild-cache",
+    is_flag=True,
+    help="Force re-upload of all files and rebuild the local cache",
+)
 def upload(
     files: tuple[str, ...],
     store_name: str,
@@ -432,6 +438,7 @@ def upload(
     skip_validation: bool,
     ignore_gitignore: bool,
     dry_run: bool,
+    rebuild_cache: bool,
 ) -> None:
     """Upload file(s) to a file search store. Supports glob patterns.
 
@@ -535,36 +542,58 @@ def upload(
         # Normalize store name
         normalized_name = normalize_store_name(store_name)
 
-        # Fetch existing documents for duplicate detection
-        existing_documents = _fetch_existing_documents(normalized_name, verbose)
+        # Initialize cache manager
+        cache_manager = CacheManager()
+
+        if rebuild_cache:
+            print_verbose("Rebuild cache requested: Ignoring local cache", verbose)
+            # We don't clear the cache immediately, we just ignore it during the check
+            # and overwrite entries as we upload.
 
         # Categorize files: new, unchanged, or changed
         files_to_actually_upload: list[Path] = []
         skipped_files: list[Path] = []
-        files_to_update: list[tuple[Path, str]] = []
+        files_to_update: list[tuple[Path, str]] = []  # (path, remote_id)
+
+        # Pre-calculate hashes for all files to check against cache
+        print_verbose("Checking local cache...", verbose)
 
         for file_path in files_to_upload:
-            display_name = str(file_path)
+            abs_path = str(file_path.resolve())
 
-            if display_name in existing_documents:
-                # File exists, check if changed
-                existing_doc = existing_documents[display_name]
-                file_size = file_path.stat().st_size
-                api_size = existing_doc["sizeBytes"]
+            # If rebuilding cache, treat everything as new/changed
+            if rebuild_cache:
+                files_to_actually_upload.append(file_path)
+                continue
 
-                if api_size == file_size:
-                    # Same size, assume unchanged
+            # Calculate local hash
+            local_hash = cache_manager.calculate_hash(file_path)
+            if not local_hash:
+                print_verbose(
+                    f"Warning: Could not calculate hash for {file_path}, skipping", verbose
+                )
+                continue
+
+            # Check cache
+            cached_state = cache_manager.get_file_state(normalized_name, abs_path)
+
+            if cached_state:
+                cached_hash = cached_state.get("hash")
+                if cached_hash == local_hash:
+                    # Hash matches, file is unchanged
                     skipped_files.append(file_path)
-                    print_verbose(f"Skipping (unchanged): {display_name}", verbose)
+                    print_verbose(f"Skipping (unchanged in cache): {file_path}", verbose)
                 else:
-                    # Size changed, needs update
-                    files_to_update.append((file_path, existing_doc["name"]))
-                    print_verbose(
-                        f"Update needed (size changed: {api_size} -> {file_size}): {display_name}",
-                        verbose,
-                    )
+                    # Hash changed, needs update
+                    remote_id = cached_state.get("remote_id")
+                    if remote_id:
+                        files_to_update.append((file_path, remote_id))
+                        print_verbose(f"Update needed (content changed): {file_path}", verbose)
+                    else:
+                        # In cache but no remote ID? Treat as new
+                        files_to_actually_upload.append(file_path)
             else:
-                # New file
+                # Not in cache, treat as new
                 files_to_actually_upload.append(file_path)
 
         print_verbose(
@@ -592,6 +621,8 @@ def upload(
                     print_verbose(f"Successfully deleted old version: {file_path}", verbose)
                 except Exception as e:
                     click.echo(f"Warning: Failed to delete {doc_name}: {str(e)}", err=True)
+                    # If delete fails (e.g. not found), we still try to upload
+                    files_to_actually_upload.append(file_path)
 
         # Prepare results
         results: list[dict[str, Any]] = []
@@ -602,7 +633,7 @@ def upload(
                 {
                     "file": str(skipped_file),
                     "status": "skipped",
-                    "reason": "Already exists in store",
+                    "reason": "Already exists in cache (content unchanged)",
                 }
             )
 
@@ -631,6 +662,19 @@ def upload(
                 def progress_callback(result: dict[str, Any]) -> None:
                     nonlocal success_count, failure_count, updated_count, skipped_count
                     file_path = Path(result["file"])
+                    abs_path = str(file_path.resolve())
+
+                    if result["status"] in ("completed", "updated"):
+                        # Update cache on success
+                        doc_name = result.get("document", {}).get("name")
+                        if doc_name:
+                            # Calculate hash again (or we could have passed it through)
+                            # Re-calculating is safer to ensure what's on disk matches
+                            # what we just uploaded
+                            content_hash = cache_manager.calculate_hash(file_path)
+                            cache_manager.update_file_state(
+                                normalized_name, abs_path, doc_name, content_hash
+                            )
 
                     if file_path in updated_files and result["status"] == "completed":
                         result["status"] = "updated"
