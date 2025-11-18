@@ -339,12 +339,22 @@ def upload_file(
         result["operation"] = operation.name if hasattr(operation, "name") else None
         logger.info(f"Upload completed successfully: {file_path}")
 
-        # Try to get document info from operation response
+        # Extract document name from operation response
+        doc_name = None
         if hasattr(operation, "response") and operation.response:
-            result["document"] = {
-                "name": getattr(operation.response, "name", None),
-                "display_name": display_name,
-            }
+            # Access document_name from UploadToFileSearchStoreResponse
+            if hasattr(operation.response, "document_name"):
+                doc_name = operation.response.document_name
+                logger.debug(f"Document uploaded: {doc_name}")
+            else:
+                logger.warning("Response missing document_name attribute")
+        else:
+            logger.warning("Operation has no response")
+
+        result["document"] = {
+            "name": doc_name,
+            "display_name": display_name,
+        }
 
         return result
     except ClientError as e:
