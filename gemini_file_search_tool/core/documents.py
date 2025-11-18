@@ -31,17 +31,20 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from google.genai.errors import ClientError
 
 from gemini_file_search_tool.core.client import get_client
 
 logger = logging.getLogger(__name__)
 
-# Register additional MIME types for common configuration files
+# Register additional MIME types for common configuration and code files
 # This ensures files with non-standard extensions can be uploaded successfully
 mimetypes.add_type("text/toml", ".toml")
 mimetypes.add_type("text/plain", ".env")
 mimetypes.add_type("text/plain", ".txt")
 mimetypes.add_type("text/markdown", ".md")
+mimetypes.add_type("text/plain", ".cs")  # C# source files
+mimetypes.add_type("text/plain", ".dockerfile")  # Dockerfile with extension
 
 
 class DocumentError(Exception):
@@ -263,6 +266,17 @@ def upload_file(
         # Build config
         config: dict[str, Any] = {"display_name": display_name}
 
+        # Detect MIME type for files without standard extensions
+        # Dockerfiles (e.g., "Dockerfile", "Dockerfile.dev", "Dockerfile.prod")
+        filename = file_path.name.lower()
+        if filename.startswith("dockerfile"):
+            config["mime_type"] = "text/plain"
+            logger.debug(f"Setting mime_type=text/plain for Dockerfile: {file_path.name}")
+        elif file_path.suffix.lower() == ".cs":
+            # Fallback for C# files if mimetypes registration didn't work
+            config["mime_type"] = "text/plain"
+            logger.debug(f"Setting mime_type=text/plain for C# file: {file_path.name}")
+
         # Add chunking config if custom values provided
         if max_tokens != 200 or max_overlap != 20:
             config["chunking_config"] = {
@@ -332,6 +346,26 @@ def upload_file(
                 "display_name": display_name,
             }
 
+        return result
+    except ClientError as e:
+        # Handle 400 "Upload has already been terminated" error
+        # This typically indicates content moderation blocking
+        if e.code == 400 and "terminated" in str(e).lower():
+            error_msg = (
+                "Upload blocked (likely content moderation). "
+                "File may contain content triggering safety filters "
+                "(profanity, hate speech, controversial content)."
+            )
+            logger.warning(f"Upload blocked for {file_path}: {error_msg}")
+            logger.debug(f"Original error: {str(e)}")
+            result["error"] = error_msg
+            result["blocked"] = True
+        else:
+            # Other ClientError cases
+            error_msg = f"Upload failed: {str(e)}"
+            logger.error(f"ClientError for {file_path}: {str(e)}")
+            logger.debug("Full traceback:", exc_info=True)
+            result["error"] = error_msg
         return result
     except FileValidationError as e:
         error_msg = str(e)

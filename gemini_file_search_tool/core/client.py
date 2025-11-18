@@ -10,6 +10,7 @@ and has been reviewed and tested by a human.
 import os
 
 from google import genai
+from google.genai import types
 
 # Global client instance for singleton pattern
 _client: genai.Client | None = None
@@ -96,18 +97,27 @@ def get_client() -> genai.Client:
     """
     global _client
     if _client is None:
+        # Configure retry options to handle transient errors but fail fast on 400s
+        http_options = types.HttpOptions(
+            retry_options=types.HttpRetryOptions(
+                attempts=3,
+                initial_delay=1.0,
+                http_status_codes=[429, 500, 502, 503, 504],  # Retry only transient errors
+            )
+        )
+
         # Check which configuration mode is being used
         if _is_vertex_ai_configured():
             # Vertex AI mode
             _validate_vertex_ai_config()
             # Client will automatically use Vertex AI env vars
-            _client = genai.Client()
+            _client = genai.Client(http_options=http_options)
         else:
             # Developer API mode
             _validate_developer_api_config()
             # Get API key (GOOGLE_API_KEY takes precedence)
             api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-            _client = genai.Client(api_key=api_key)
+            _client = genai.Client(api_key=api_key, http_options=http_options)
 
     return _client
 
