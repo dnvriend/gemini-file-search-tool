@@ -566,35 +566,54 @@ def upload(
                 files_to_actually_upload.append(file_path)
                 continue
 
-            # Calculate local hash
-            local_hash = cache_manager.calculate_hash(file_path)
-            if not local_hash:
-                print_verbose(
-                    f"Warning: Could not calculate hash for {file_path}, skipping", verbose
-                )
-                continue
-
-            # Check cache
+            # Check cache first
             cached_state = cache_manager.get_file_state(normalized_name, abs_path)
+            current_mtime = file_path.stat().st_mtime
 
+            # Optimization: Check mtime before calculating expensive hash
+            needs_hash = True
             if cached_state:
-                cached_hash = cached_state.get("hash")
-                if cached_hash == local_hash:
-                    # Hash matches, file is unchanged
-                    skipped_files.append(file_path)
-                    print_verbose(f"Skipping (unchanged in cache): {file_path}", verbose)
-                else:
-                    # Hash changed, needs update
-                    remote_id = cached_state.get("remote_id")
-                    if remote_id:
-                        files_to_update.append((file_path, remote_id))
-                        print_verbose(f"Update needed (content changed): {file_path}", verbose)
+                cached_mtime = cached_state.get("mtime")
+                if cached_mtime is not None and cached_mtime == current_mtime:
+                    # mtime unchanged, file is likely unchanged - skip hash calculation
+                    cached_hash = cached_state.get("hash")
+                    if cached_hash:
+                        # File definitely unchanged
+                        skipped_files.append(file_path)
+                        print_verbose(f"Skipping (unchanged in cache): {file_path}", verbose)
+                        needs_hash = False
+
+            if needs_hash:
+                # Calculate local hash (mtime changed or not in cache)
+                local_hash = cache_manager.calculate_hash(file_path)
+                if not local_hash:
+                    print_verbose(
+                        f"Warning: Could not calculate hash for {file_path}, skipping",
+                        verbose,
+                    )
+                    continue
+
+                if cached_state:
+                    cached_hash = cached_state.get("hash")
+                    if cached_hash == local_hash:
+                        # Hash matches despite mtime change (e.g., touch, metadata change)
+                        skipped_files.append(file_path)
+                        print_verbose(
+                            f"Skipping (unchanged content, mtime updated): {file_path}",
+                            verbose,
+                        )
                     else:
-                        # In cache but no remote ID? Treat as new
-                        files_to_actually_upload.append(file_path)
-            else:
-                # Not in cache, treat as new
-                files_to_actually_upload.append(file_path)
+                        # Hash changed, needs update
+                        remote_id = cached_state.get("remote_id")
+                        if remote_id:
+                            files_to_update.append((file_path, remote_id))
+                            print_verbose(f"Update needed (content changed): {file_path}", verbose)
+                        else:
+                            # In cache but no remote ID? Treat as new
+                            files_to_actually_upload.append(file_path)
+                else:
+                    # Not in cache, treat as new
+                    files_to_actually_upload.append(file_path)
 
         print_verbose(
             f"Found {len(files_to_upload)} file(s): "
@@ -672,8 +691,9 @@ def upload(
                             # Re-calculating is safer to ensure what's on disk matches
                             # what we just uploaded
                             content_hash = cache_manager.calculate_hash(file_path)
+                            file_mtime = file_path.stat().st_mtime
                             cache_manager.update_file_state(
-                                normalized_name, abs_path, doc_name, content_hash
+                                normalized_name, abs_path, doc_name, content_hash, file_mtime
                             )
 
                     if file_path in updated_files and result["status"] == "completed":

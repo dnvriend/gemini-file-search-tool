@@ -54,11 +54,16 @@ class CacheManager:
             Dictionary containing cache data with structure {"stores": {...}}
         """
         if not self.cache_file.exists():
+            logger.debug(f"Cache file does not exist: {self.cache_file}")
             return {"stores": {}}
 
         try:
             with open(self.cache_file, encoding="utf-8") as f:
-                return cast(dict[str, Any], json.load(f))
+                cache_data = cast(dict[str, Any], json.load(f))
+                stores_count = len(cache_data.get("stores", {}))
+                logger.info(f"Loaded cache from {self.cache_file} ({stores_count} store(s))")
+                logger.debug(f"Cache stores: {list(cache_data.get('stores', {}).keys())}")
+                return cache_data
         except Exception as e:
             logger.warning(f"Failed to load cache file: {e}. Starting with empty cache.")
             return {"stores": {}}
@@ -68,6 +73,7 @@ class CacheManager:
         try:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2)
+            logger.debug(f"Saved cache to {self.cache_file}")
         except Exception as e:
             logger.warning(f"Failed to save cache file: {e}")
 
@@ -80,13 +86,16 @@ class CacheManager:
         Returns:
             Hex digest of the SHA256 hash
         """
+        logger.debug(f"Calculating SHA256 hash for: {file_path}")
         sha256_hash = hashlib.sha256()
         try:
             with open(file_path, "rb") as f:
                 # Read in chunks to handle large files
                 for byte_block in iter(lambda: f.read(4096), b""):
                     sha256_hash.update(byte_block)
-            return sha256_hash.hexdigest()
+            hash_result = sha256_hash.hexdigest()
+            logger.debug(f"Hash calculated: {hash_result[:16]}...")
+            return hash_result
         except Exception as e:
             logger.warning(f"Failed to calculate hash for {file_path}: {e}")
             return ""
@@ -103,7 +112,16 @@ class CacheManager:
         """
         stores = self.cache.get("stores", {})
         store_cache = stores.get(store_name, {})
-        return cast(dict[str, Any] | None, store_cache.get(file_path))
+        state = cast(dict[str, Any] | None, store_cache.get(file_path))
+        if state:
+            logger.debug(
+                f"Cache hit for {Path(file_path).name}: "
+                f"hash={state.get('hash', '')[:8]}..., "
+                f"mtime={state.get('mtime', 'N/A')}"
+            )
+        else:
+            logger.debug(f"Cache miss for {Path(file_path).name}")
+        return state
 
     def update_file_state(
         self,
@@ -111,6 +129,7 @@ class CacheManager:
         file_path: str,
         remote_id: str | None = None,
         content_hash: str | None = None,
+        mtime: float | None = None,
     ) -> None:
         """Update the cached state of a file.
 
@@ -119,6 +138,7 @@ class CacheManager:
             file_path: Absolute path to the file
             remote_id: ID of the document in the store
             content_hash: SHA256 hash of the file content
+            mtime: File modification time (Unix timestamp)
         """
         if "stores" not in self.cache:
             self.cache["stores"] = {}
@@ -134,11 +154,20 @@ class CacheManager:
             new_state["remote_id"] = remote_id
         if content_hash:
             new_state["hash"] = content_hash
+        if mtime is not None:
+            new_state["mtime"] = mtime
 
         # Always update timestamp
         import datetime
 
         new_state["last_uploaded"] = datetime.datetime.now(datetime.UTC).isoformat()
+
+        logger.info(
+            f"Updating cache for {Path(file_path).name}: "
+            f"remote_id={remote_id or 'unchanged'}, "
+            f"hash={content_hash[:8] + '...' if content_hash else 'unchanged'}, "
+            f"mtime={mtime or 'unchanged'}"
+        )
 
         self.cache["stores"][store_name][file_path] = new_state
         self._save_cache()
@@ -155,6 +184,7 @@ class CacheManager:
             and store_name in self.cache["stores"]
             and file_path in self.cache["stores"][store_name]
         ):
+            logger.info(f"Removing {Path(file_path).name} from cache")
             del self.cache["stores"][store_name][file_path]
             self._save_cache()
 
@@ -165,5 +195,7 @@ class CacheManager:
             store_name: Name of the store
         """
         if "stores" in self.cache and store_name in self.cache["stores"]:
+            file_count = len(self.cache["stores"][store_name])
+            logger.info(f"Clearing cache for store '{store_name}' ({file_count} file(s))")
             del self.cache["stores"][store_name]
             self._save_cache()

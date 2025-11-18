@@ -33,13 +33,15 @@ class TestCacheManager(unittest.TestCase):
         file_path = "/path/to/file.py"
         remote_id = "documents/123"
         content_hash = "abc123hash"
+        mtime = 1731969000.0
 
-        self.cache_manager.update_file_state(store, file_path, remote_id, content_hash)
+        self.cache_manager.update_file_state(store, file_path, remote_id, content_hash, mtime)
 
         state = self.cache_manager.get_file_state(store, file_path)
         self.assertIsNotNone(state)
         self.assertEqual(state["remote_id"], remote_id)
         self.assertEqual(state["hash"], content_hash)
+        self.assertEqual(state["mtime"], mtime)
         self.assertIn("last_uploaded", state)
 
     def test_persistence(self):
