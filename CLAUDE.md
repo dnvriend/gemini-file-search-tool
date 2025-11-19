@@ -141,10 +141,12 @@ make clean          # Remove build artifacts and caches
   - **Grounding**: `--query-grounding-metadata` - Include source citations in response
 
 ### Cache Commands (cache_commands.py)
-- `sync-cache --store NAME [--text] [-v]` - Sync pending operations and update cache with final status
+- `sync-cache --store NAME [--num-workers N] [--text] [-v]` - Sync pending operations and update cache with final status
+  - **Parallel Processing**: Uses ThreadPoolExecutor to fetch operation status concurrently (default: 4 workers)
   - Fetches status for all pending operations using `client.operations.get()`
   - Updates cache with remote_id when operations complete successfully
   - Stores error details for failed operations
+  - **Batch Cache Writes**: Collects all updates in memory and writes cache once at the end (not per-operation)
   - Progress bar with tqdm showing synced/failed/pending counts
   - JSON output (default) or human-readable text with `--text`
   - Idempotent: Safe to run multiple times
@@ -158,11 +160,16 @@ make clean          # Remove build artifacts and caches
   - JSON output (default) or human-readable text with `--text`
 
 **Implementation Notes** (cache_commands.py):
+- **Parallel Architecture**:
+  - Worker function `_sync_single_operation()` processes one operation
+  - ThreadPoolExecutor with configurable workers (default: 4)
+  - Returns dict with status, cache_update, and result
+  - Batch writes cache at end using collected updates
 - **SDK Bug Workaround**: `operations.get()` expects an operation object, not a string
   - Solution: Construct `genai.types.UploadToFileSearchStoreOperation(name=operation_name)`
   - Type stub doesn't reflect runtime behavior, requires `type: ignore[call-arg]`
 - **Operation Status Checking**: Uses hasattr() checks for safe attribute access
-- **Progress Tracking**: tqdm progress bar with postfix showing counts
+- **Progress Tracking**: tqdm progress bar with postfix showing counts (updated as tasks complete)
 - **Error Handling**: Captures full operation object including error details
 
 ## Library Usage

@@ -544,6 +544,9 @@ Check status of pending operations and update cache with final results:
 # Sync all pending operations for a store
 gemini-file-search-tool sync-cache --store "docs" -v
 
+# With custom number of workers (default: 4)
+gemini-file-search-tool sync-cache --store "docs" --num-workers 8 -v
+
 # Output (JSON - default):
 {
   "status": "success",
@@ -569,6 +572,8 @@ Sync Summary:
 ```
 
 **Features**:
+- **Parallel Processing**: Fetches operation status concurrently with configurable workers (default: 4)
+- **Batch Cache Writes**: Collects all updates and writes cache once at the end (not per-operation)
 - **Progress Bar**: Visual feedback with tqdm during sync
 - **Error Details**: Captures and stores error messages from failed operations
 - **Automatic Updates**: Updates cache with remote_id when operations complete successfully

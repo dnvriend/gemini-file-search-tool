@@ -312,18 +312,22 @@ def sync_cache(store_name: str, verbose: int, text: bool, num_workers: int | Non
                         file_path = future_to_file[future]
                         logger.error(f"Unexpected error for {Path(file_path).name}: {str(e)}")
                         failed_count += 1
-                        results.append({
-                            "file": file_path,
-                            "status": "error",
-                            "error": {"message": f"Unexpected error: {str(e)}"},
-                        })
+                        results.append(
+                            {
+                                "file": file_path,
+                                "status": "error",
+                                "error": {"message": f"Unexpected error: {str(e)}"},
+                            }
+                        )
 
                     # Update progress bar
-                    pbar.set_postfix({
-                        "synced": synced_count,
-                        "failed": failed_count,
-                        "pending": still_pending_count,
-                    })
+                    pbar.set_postfix(
+                        {
+                            "synced": synced_count,
+                            "failed": failed_count,
+                            "pending": still_pending_count,
+                        }
+                    )
                     pbar.update(1)
 
         # Batch write all cache updates at once (after all operations complete)
