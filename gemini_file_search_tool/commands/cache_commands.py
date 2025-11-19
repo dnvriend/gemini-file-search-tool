@@ -209,14 +209,19 @@ def _sync_single_operation(
 def sync_cache(store_name: str, verbose: int, text: bool, num_workers: int | None) -> None:
     """Sync pending operations from cache and update with final status.
 
-    Loops through all pending operations in the cache, checks their status,
-    and updates the cache with remote_id if the operation completed successfully.
+    Fetches operation status for all pending operations in parallel using ThreadPoolExecutor,
+    then batch-writes all cache updates at once. Supports configurable concurrency with
+    --num-workers for optimal performance.
 
     Examples:
 
     \b
         # Sync all pending operations for a store
         gemini-file-search-tool sync-cache --store "my-store"
+
+    \b
+        # With custom number of workers (default: 4)
+        gemini-file-search-tool sync-cache --store "my-store" --num-workers 8
 
     \b
         # With verbose output

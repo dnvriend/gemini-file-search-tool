@@ -506,12 +506,21 @@ def upload(
         gemini-file-search-tool upload "**/*.py" --store "code" --dry-run -v
 
     \b
+        # Fast async upload (don't wait for completion)
+        gemini-file-search-tool upload "*.pdf" --store "papers" --no-wait -v
+
+    \b
+        # Rebuild cache (force re-upload all files)
+        gemini-file-search-tool upload "**/*.py" --store "code" --rebuild-cache
+
+    \b
     Output Format:
         Returns JSON array with status for each file:
         [
           {"file": "doc.pdf", "status": "completed", "document_name": "..."},
           {"file": "dup.pdf", "status": "skipped", "reason": "Already exists"},
-          {"file": "old.pdf", "status": "updated", "document_name": "..."}
+          {"file": "old.pdf", "status": "updated", "document_name": "..."},
+          {"file": "new.pdf", "status": "pending", "operation": "operations/..."}
         ]
     """
     # Setup logging based on verbosity level

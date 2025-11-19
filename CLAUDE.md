@@ -28,7 +28,8 @@ gemini_file_search_tool/
 ├── commands/                # CLI command implementations
 │   ├── store_commands.py   # Store management commands
 │   ├── document_commands.py # Document management commands
-│   └── query_commands.py   # Query commands (with enhancement integration)
+│   ├── query_commands.py   # Query commands (with enhancement integration)
+│   └── cache_commands.py   # Cache management commands (sync, flush, report)
 └── utils.py                 # Shared utilities (normalize_store_name, output_json, aggregate_costs, etc.)
 ```
 
