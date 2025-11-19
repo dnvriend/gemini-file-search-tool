@@ -8,6 +8,7 @@ and has been reviewed and tested by a human.
 """
 
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,165 @@ from gemini_file_search_tool.core.cache import CacheManager
 from gemini_file_search_tool.core.client import MissingConfigurationError, get_client
 from gemini_file_search_tool.logging_config import get_logger, setup_logging
 from gemini_file_search_tool.utils import normalize_store_name, output_json, print_verbose
+
+
+def _sync_single_operation(
+    file_path: str, state: dict[str, Any], client: Any, logger: Any
+) -> dict[str, Any]:
+    """Sync a single pending operation.
+
+    Args:
+        file_path: Absolute path to the file
+        state: Cached state dict for this file
+        client: Gemini client instance
+        logger: Logger instance
+
+    Returns:
+        Dictionary with sync result:
+            - file: File path
+            - status: 'synced', 'failed', 'pending', or 'error'
+            - cache_update: Dict with fields to update in cache (or None)
+            - result: Result dict for JSON output
+    """
+    operation_obj = state.get("operation", {})
+    operation_name = operation_obj.get("name")
+
+    if not operation_name:
+        logger.warning(f"Skipping {Path(file_path).name}: Missing operation name")
+        return {
+            "file": file_path,
+            "status": "error",
+            "cache_update": None,
+            "result": {
+                "file": file_path,
+                "status": "error",
+                "error": {"message": "Missing operation name"},
+            },
+        }
+
+    try:
+        # Fetch operation status
+        logger.debug(f"Checking operation: {operation_name}")
+        # Create operation object with name for SDK's operations.get()
+        # Type stub doesn't reflect runtime behavior, name arg works at runtime
+        op_ref = genai.types.UploadToFileSearchStoreOperation(name=operation_name)  # type: ignore[call-arg]
+        operation = client.operations.get(op_ref)
+
+        # Store updated operation object
+        updated_operation = {
+            "name": operation.name if hasattr(operation, "name") else operation_name,
+            "done": operation.done if hasattr(operation, "done") else False,
+            "metadata": (
+                dict(operation.metadata)
+                if hasattr(operation, "metadata") and operation.metadata
+                else {}
+            ),
+        }
+
+        # Check if error
+        if hasattr(operation, "error") and operation.error:
+            error_code = operation.error.code if hasattr(operation.error, "code") else None
+            error_message = (
+                operation.error.message
+                if hasattr(operation.error, "message")
+                else str(operation.error)
+            )
+            updated_operation["error"] = {
+                "code": error_code,
+                "message": error_message,
+            }
+            logger.warning(f"Operation failed: {Path(file_path).name}")
+            return {
+                "file": file_path,
+                "status": "failed",
+                "cache_update": {
+                    "operation": updated_operation,
+                    "content_hash": state.get("hash"),
+                    "mtime": state.get("mtime"),
+                },
+                "result": {
+                    "file": file_path,
+                    "status": "failed",
+                    "operation": operation_name,
+                    "error": updated_operation["error"],
+                },
+            }
+        # Check if done
+        elif hasattr(operation, "done") and operation.done:
+            # Extract document name
+            doc_name = None
+            if hasattr(operation, "response") and operation.response:
+                if hasattr(operation.response, "document_name"):
+                    doc_name = operation.response.document_name
+
+            if doc_name:
+                # Success - will update cache with remote_id
+                logger.info(f"Synced: {Path(file_path).name}")
+                return {
+                    "file": file_path,
+                    "status": "synced",
+                    "cache_update": {
+                        "remote_id": doc_name,
+                        "content_hash": state.get("hash"),
+                        "mtime": state.get("mtime"),
+                    },
+                    "result": {
+                        "file": file_path,
+                        "status": "synced",
+                        "remote_id": doc_name,
+                    },
+                }
+            else:
+                # Done but no document name? Store as failed
+                error_msg = "Operation done but no document_name"
+                updated_operation["error"] = {"message": error_msg}
+                logger.warning(f"Operation done but no document: {Path(file_path).name}")
+                return {
+                    "file": file_path,
+                    "status": "failed",
+                    "cache_update": {
+                        "operation": updated_operation,
+                        "content_hash": state.get("hash"),
+                        "mtime": state.get("mtime"),
+                    },
+                    "result": {
+                        "file": file_path,
+                        "status": "failed",
+                        "operation": operation_name,
+                        "error": updated_operation["error"],
+                    },
+                }
+        else:
+            # Still pending - update operation object in cache
+            logger.debug(f"Still pending: {Path(file_path).name}")
+            return {
+                "file": file_path,
+                "status": "pending",
+                "cache_update": {
+                    "operation": updated_operation,
+                    "content_hash": state.get("hash"),
+                    "mtime": state.get("mtime"),
+                },
+                "result": {
+                    "file": file_path,
+                    "status": "pending",
+                    "operation": operation_name,
+                },
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to sync {Path(file_path).name}: {str(e)}")
+        return {
+            "file": file_path,
+            "status": "error",
+            "cache_update": None,
+            "result": {
+                "file": file_path,
+                "status": "error",
+                "operation": operation_name,
+                "error": {"message": str(e)},
+            },
+        }
 
 
 @click.command("sync-cache")
@@ -40,7 +200,13 @@ from gemini_file_search_tool.utils import normalize_store_name, output_json, pri
     is_flag=True,
     help="Output human-readable text format instead of JSON",
 )
-def sync_cache(store_name: str, verbose: int, text: bool) -> None:
+@click.option(
+    "--num-workers",
+    type=int,
+    default=None,
+    help="Number of concurrent workers (default: 4)",
+)
+def sync_cache(store_name: str, verbose: int, text: bool, num_workers: int | None) -> None:
     """Sync pending operations from cache and update with final status.
 
     Loops through all pending operations in the cache, checks their status,
@@ -92,12 +258,19 @@ def sync_cache(store_name: str, verbose: int, text: bool) -> None:
 
         print_verbose(f"Found {len(pending_ops)} pending operation(s) to sync", verbose)
 
+        # Set default num_workers
+        if num_workers is None:
+            num_workers = 4
+
+        print_verbose(f"Using {num_workers} worker(s)", verbose)
+
         synced_count = 0
         failed_count = 0
         still_pending_count = 0
         results: list[dict[str, Any]] = []
+        cache_updates: list[tuple[str, dict[str, Any]]] = []  # (file_path, update_dict)
 
-        # Process with progress bar
+        # Process operations concurrently with progress bar
         with tqdm(
             total=len(pending_ops),
             desc="Syncing operations",
@@ -105,153 +278,59 @@ def sync_cache(store_name: str, verbose: int, text: bool) -> None:
             file=sys.stderr,
             disable=not verbose,
         ) as pbar:
-            for file_path, state in pending_ops.items():
-                operation_obj = state.get("operation", {})
-                operation_name = operation_obj.get("name")
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all operations
+                future_to_file = {
+                    executor.submit(
+                        _sync_single_operation, file_path, state, client, logger
+                    ): file_path
+                    for file_path, state in pending_ops.items()
+                }
 
-                if not operation_name:
-                    logger.warning(f"Skipping {Path(file_path).name}: Missing operation name")
-                    pbar.update(1)
-                    continue
+                # Process completed operations as they finish
+                for future in as_completed(future_to_file):
+                    try:
+                        sync_result = future.result()
+                        status = sync_result["status"]
 
-                try:
-                    # Fetch operation status
-                    logger.debug(f"Checking operation: {operation_name}")
-                    # Create operation object with name for SDK's operations.get()
-                    # Type stub doesn't reflect runtime behavior, name arg works at runtime
-                    op_ref = genai.types.UploadToFileSearchStoreOperation(name=operation_name)  # type: ignore[call-arg]
-                    operation = client.operations.get(op_ref)
-
-                    # Store updated operation object
-                    updated_operation = {
-                        "name": operation.name if hasattr(operation, "name") else operation_name,
-                        "done": operation.done if hasattr(operation, "done") else False,
-                        "metadata": (
-                            dict(operation.metadata)
-                            if hasattr(operation, "metadata") and operation.metadata
-                            else {}
-                        ),
-                    }
-
-                    # Check if error
-                    if hasattr(operation, "error") and operation.error:
-                        error_code = (
-                            operation.error.code if hasattr(operation.error, "code") else None
-                        )
-                        error_message = (
-                            operation.error.message
-                            if hasattr(operation.error, "message")
-                            else str(operation.error)
-                        )
-                        updated_operation["error"] = {
-                            "code": error_code,
-                            "message": error_message,
-                        }
-                        failed_count += 1
-                        logger.warning(f"Operation failed: {Path(file_path).name}")
-                        results.append(
-                            {
-                                "file": file_path,
-                                "status": "failed",
-                                "operation": operation_name,
-                                "error": updated_operation["error"],
-                            }
-                        )
-                        # Update cache with error details
-                        cache_manager.update_file_state(
-                            normalized_name,
-                            file_path,
-                            operation=updated_operation,
-                            content_hash=state.get("hash"),
-                            mtime=state.get("mtime"),
-                        )
-                    # Check if done
-                    elif hasattr(operation, "done") and operation.done:
-                        # Extract document name
-                        doc_name = None
-                        if hasattr(operation, "response") and operation.response:
-                            if hasattr(operation.response, "document_name"):
-                                doc_name = operation.response.document_name
-
-                        if doc_name:
-                            # Success - update cache with remote_id
-                            cache_manager.update_file_state(
-                                normalized_name,
-                                file_path,
-                                remote_id=doc_name,
-                                content_hash=state.get("hash"),
-                                mtime=state.get("mtime"),
-                            )
+                        # Update counters
+                        if status == "synced":
                             synced_count += 1
-                            logger.info(f"Synced: {Path(file_path).name}")
-                            results.append(
-                                {
-                                    "file": file_path,
-                                    "status": "synced",
-                                    "remote_id": doc_name,
-                                }
-                            )
-                        else:
-                            # Done but no document name? Store as failed
-                            error_msg = "Operation done but no document_name"
-                            updated_operation["error"] = {"message": error_msg}
-                            cache_manager.update_file_state(
-                                normalized_name,
-                                file_path,
-                                operation=updated_operation,
-                                content_hash=state.get("hash"),
-                                mtime=state.get("mtime"),
-                            )
+                        elif status == "failed" or status == "error":
                             failed_count += 1
-                            file_name = Path(file_path).name
-                            logger.warning(f"Operation done but no document: {file_name}")
-                            results.append(
-                                {
-                                    "file": file_path,
-                                    "status": "failed",
-                                    "operation": operation_name,
-                                    "error": updated_operation["error"],
-                                }
-                            )
-                    else:
-                        # Still pending - update operation object in cache
-                        cache_manager.update_file_state(
-                            normalized_name,
-                            file_path,
-                            operation=updated_operation,
-                            content_hash=state.get("hash"),
-                            mtime=state.get("mtime"),
-                        )
-                        still_pending_count += 1
-                        logger.debug(f"Still pending: {Path(file_path).name}")
-                        results.append(
-                            {
-                                "file": file_path,
-                                "status": "pending",
-                                "operation": operation_name,
-                            }
-                        )
+                        elif status == "pending":
+                            still_pending_count += 1
 
-                except Exception as e:
-                    logger.error(f"Failed to sync {Path(file_path).name}: {str(e)}")
-                    failed_count += 1
-                    results.append(
-                        {
+                        # Collect cache update for batch write
+                        if sync_result["cache_update"] is not None:
+                            cache_updates.append((sync_result["file"], sync_result["cache_update"]))
+
+                        # Collect result for output
+                        results.append(sync_result["result"])
+
+                    except Exception as e:
+                        file_path = future_to_file[future]
+                        logger.error(f"Unexpected error for {Path(file_path).name}: {str(e)}")
+                        failed_count += 1
+                        results.append({
                             "file": file_path,
                             "status": "error",
-                            "operation": operation_name,
-                            "error": {"message": str(e)},
-                        }
-                    )
+                            "error": {"message": f"Unexpected error: {str(e)}"},
+                        })
 
-                pbar.set_postfix(
-                    {
+                    # Update progress bar
+                    pbar.set_postfix({
                         "synced": synced_count,
                         "failed": failed_count,
                         "pending": still_pending_count,
-                    }
-                )
-                pbar.update(1)
+                    })
+                    pbar.update(1)
+
+        # Batch write all cache updates at once (after all operations complete)
+        logger.info(f"Writing {len(cache_updates)} cache update(s)")
+        for file_path, update_dict in cache_updates:
+            cache_manager.update_file_state(normalized_name, file_path, **update_dict)
+        logger.info("Cache write complete")
 
         # Output results
         if text:
