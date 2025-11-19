@@ -12,8 +12,8 @@ class TestCacheManager(unittest.TestCase):
         self.cache_manager = CacheManager(app_name="test-app")
         # Override cache dir for testing
         self.cache_manager.cache_dir = self.test_dir
-        self.cache_manager.cache_file = self.test_dir / "cache.json"
-        self.cache_manager.cache = {"stores": {}}
+        self.cache_manager.stores_dir = self.test_dir / "stores"
+        self.cache_manager.stores_dir.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -53,8 +53,7 @@ class TestCacheManager(unittest.TestCase):
         # Create new manager instance to verify load from disk
         new_manager = CacheManager(app_name="test-app")
         new_manager.cache_dir = self.test_dir
-        new_manager.cache_file = self.test_dir / "cache.json"
-        new_manager.cache = new_manager._load_cache()
+        new_manager.stores_dir = self.test_dir / "stores"
 
         state = new_manager.get_file_state(store, file_path)
         self.assertIsNotNone(state)

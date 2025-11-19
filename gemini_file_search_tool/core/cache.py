@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class CacheManager:
-    """Manages a local JSON cache of uploaded files."""
+    """Manages local JSON cache files for uploaded files (one file per store)."""
 
     def __init__(self, app_name: str = "gemini-file-search-tool"):
         """Initialize the cache manager.
@@ -27,8 +27,8 @@ class CacheManager:
         """
         self.app_name = app_name
         self.cache_dir = self._get_cache_dir()
-        self.cache_file = self.cache_dir / "cache.json"
-        self.cache: dict[str, Any] = self._load_cache()
+        self.stores_dir = self.cache_dir / "stores"
+        self.stores_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_cache_dir(self) -> Path:
         """Get the application cache directory.
@@ -47,35 +47,63 @@ class CacheManager:
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir
 
-    def _load_cache(self) -> dict[str, Any]:
-        """Load the cache from disk.
+    def _store_name_to_filename(self, store_name: str) -> str:
+        """Convert store name to safe filename.
+
+        Args:
+            store_name: Store name (may contain slashes)
 
         Returns:
-            Dictionary containing cache data with structure {"stores": {...}}
+            Safe filename with slashes replaced by double underscores
         """
-        if not self.cache_file.exists():
-            logger.debug(f"Cache file does not exist: {self.cache_file}")
-            return {"stores": {}}
+        # Replace / with __ to create safe filename
+        # Example: "fileSearchStores/obsidian-abc" -> "fileSearchStores__obsidian-abc.json"
+        return store_name.replace("/", "__") + ".json"
+
+    def _load_cache(self, store_name: str) -> dict[str, Any]:
+        """Load the cache for a specific store from disk.
+
+        Args:
+            store_name: Name of the store
+
+        Returns:
+            Dictionary mapping file paths to their cached state
+        """
+        cache_file = self.stores_dir / self._store_name_to_filename(store_name)
+
+        if not cache_file.exists():
+            logger.debug(f"Cache file does not exist for store '{store_name}': {cache_file}")
+            return {}
 
         try:
-            with open(self.cache_file, encoding="utf-8") as f:
+            with open(cache_file, encoding="utf-8") as f:
                 cache_data = cast(dict[str, Any], json.load(f))
-                stores_count = len(cache_data.get("stores", {}))
-                logger.info(f"Loaded cache from {self.cache_file} ({stores_count} store(s))")
-                logger.debug(f"Cache stores: {list(cache_data.get('stores', {}).keys())}")
+                file_count = len(cache_data)
+                logger.info(
+                    f"Loaded cache for store '{store_name}': {file_count} file(s) from {cache_file}"
+                )
                 return cache_data
         except Exception as e:
-            logger.warning(f"Failed to load cache file: {e}. Starting with empty cache.")
-            return {"stores": {}}
+            logger.warning(
+                f"Failed to load cache file for '{store_name}': {e}. Starting with empty cache."
+            )
+            return {}
 
-    def _save_cache(self) -> None:
-        """Save the cache to disk."""
+    def _save_cache(self, store_name: str, cache_data: dict[str, Any]) -> None:
+        """Save the cache for a specific store to disk.
+
+        Args:
+            store_name: Name of the store
+            cache_data: Cache data to save (dict mapping file paths to state)
+        """
+        cache_file = self.stores_dir / self._store_name_to_filename(store_name)
+
         try:
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, indent=2)
-            logger.debug(f"Saved cache to {self.cache_file}")
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, indent=2)
+            logger.debug(f"Saved cache for store '{store_name}' to {cache_file}")
         except Exception as e:
-            logger.warning(f"Failed to save cache file: {e}")
+            logger.warning(f"Failed to save cache file for '{store_name}': {e}")
 
     def calculate_hash(self, file_path: Path) -> str:
         """Calculate SHA256 hash of a file.
@@ -110,9 +138,8 @@ class CacheManager:
         Returns:
             Dictionary with file state or None if not in cache
         """
-        stores = self.cache.get("stores", {})
-        store_cache = stores.get(store_name, {})
-        state = cast(dict[str, Any] | None, store_cache.get(file_path))
+        cache_data = self._load_cache(store_name)
+        state = cast(dict[str, Any] | None, cache_data.get(file_path))
         if state:
             logger.debug(
                 f"Cache hit for {Path(file_path).name}: "
@@ -140,14 +167,11 @@ class CacheManager:
             content_hash: SHA256 hash of the file content
             mtime: File modification time (Unix timestamp)
         """
-        if "stores" not in self.cache:
-            self.cache["stores"] = {}
-
-        if store_name not in self.cache["stores"]:
-            self.cache["stores"][store_name] = {}
+        # Load current cache for this store
+        cache_data = self._load_cache(store_name)
 
         # Get existing state to preserve fields if not provided
-        current_state = self.cache["stores"][store_name].get(file_path, {})
+        current_state = cache_data.get(file_path, {})
 
         new_state = current_state.copy()
         if remote_id:
@@ -169,8 +193,8 @@ class CacheManager:
             f"mtime={mtime or 'unchanged'}"
         )
 
-        self.cache["stores"][store_name][file_path] = new_state
-        self._save_cache()
+        cache_data[file_path] = new_state
+        self._save_cache(store_name, cache_data)
 
     def remove_file_state(self, store_name: str, file_path: str) -> None:
         """Remove a file from the cache.
@@ -179,14 +203,11 @@ class CacheManager:
             store_name: Name of the store
             file_path: Absolute path to the file
         """
-        if (
-            "stores" in self.cache
-            and store_name in self.cache["stores"]
-            and file_path in self.cache["stores"][store_name]
-        ):
+        cache_data = self._load_cache(store_name)
+        if file_path in cache_data:
             logger.info(f"Removing {Path(file_path).name} from cache")
-            del self.cache["stores"][store_name][file_path]
-            self._save_cache()
+            del cache_data[file_path]
+            self._save_cache(store_name, cache_data)
 
     def clear_store_cache(self, store_name: str) -> None:
         """Clear all cache entries for a specific store.
@@ -194,8 +215,9 @@ class CacheManager:
         Args:
             store_name: Name of the store
         """
-        if "stores" in self.cache and store_name in self.cache["stores"]:
-            file_count = len(self.cache["stores"][store_name])
+        cache_file = self.stores_dir / self._store_name_to_filename(store_name)
+        if cache_file.exists():
+            cache_data = self._load_cache(store_name)
+            file_count = len(cache_data)
             logger.info(f"Clearing cache for store '{store_name}' ({file_count} file(s))")
-            del self.cache["stores"][store_name]
-            self._save_cache()
+            cache_file.unlink()  # Delete the file
