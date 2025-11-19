@@ -675,6 +675,7 @@ def upload(
             failure_count = 0
             updated_count = 0
             skipped_count = len(skipped_files)
+            pending_count = 0
 
             # Progress bar
             with tqdm(
@@ -685,7 +686,12 @@ def upload(
             ) as pbar:
 
                 def progress_callback(result: dict[str, Any]) -> None:
-                    nonlocal success_count, failure_count, updated_count, skipped_count
+                    nonlocal \
+                        success_count, \
+                        failure_count, \
+                        updated_count, \
+                        skipped_count, \
+                        pending_count
                     file_path = Path(result["file"])
                     abs_path = str(file_path.resolve())
 
@@ -724,6 +730,8 @@ def upload(
                         updated_count += 1
                     elif result["status"] == "completed":
                         success_count += 1
+                    elif result["status"] == "pending":
+                        pending_count += 1
                     elif result["status"] == "skipped":
                         skipped_count += 1
                     else:
@@ -733,6 +741,7 @@ def upload(
                         {
                             "new": success_count,
                             "updated": updated_count,
+                            "pending": pending_count,
                             "failed": failure_count,
                             "skipped": skipped_count,
                             "current": file_path.name,
@@ -756,8 +765,8 @@ def upload(
 
                 results.extend(upload_results)
 
-            # Exit with error if all uploads failed (excluding skipped files like empty files)
-            successful_uploads = success_count + updated_count
+            # Exit with error if all uploads failed (excluding skipped and pending)
+            successful_uploads = success_count + updated_count + pending_count
             if failure_count > 0 and successful_uploads == 0 and skipped_count == 0:
                 click.echo(
                     f"Error: All {len(files_to_actually_upload)} attempted upload(s) failed",
