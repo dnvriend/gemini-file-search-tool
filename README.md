@@ -88,6 +88,8 @@ gemini-file-search-tool query "Where is error handling for API calls implemented
 - ✅ **Multi-Format Support**: PDF, DOCX, TXT, JSON, CSV, HTML, and source code files
 - ✅ **Code-RAG Enabled**: Upload codebases and query with natural language for semantic code search
 - ✅ **Intelligent Caching**: Local mtime-based cache (O(1) performance) prevents unnecessary re-uploads
+- ✅ **Async Uploads**: `--no-wait` flag for fire-and-forget uploads with manual sync capability
+- ✅ **Cache Management**: sync-cache, flush-cache, and cache-report commands for operation tracking
 - ✅ **Query Enhancement**: LLM-powered query optimization for better RAG retrieval (generic, code-rag, obsidian modes)
 - ✅ **Natural Language Queries**: Ask questions in plain language and get contextual answers
 - ✅ **Automatic Citations**: Built-in source attribution and grounding metadata
@@ -504,6 +506,202 @@ gemini-file-search-tool upload "*.pdf" --store "docs" -vvv
 - **Progressive Detail**: Choose the right level of verbosity for your needs
 - **Clean stdout**: All logs go to stderr, keeping JSON output clean for piping
 - **Library Logging**: At `-vvv`, see internals from `httpx`, `google-api-core`, etc.
+
+### Cache Management
+
+The CLI provides commands to manage the local cache for asynchronous upload operations and cache maintenance.
+
+#### Asynchronous Uploads
+
+Use `--no-wait` to skip operation polling and return immediately after initiating uploads:
+
+```bash
+# Fast async uploads (don't wait for completion)
+gemini-file-search-tool upload "*.pdf" --store "docs" --no-wait -v
+
+# Output: Returns immediately with "pending" status
+[
+  {"file": "doc1.pdf", "status": "pending", "operation": "operations/..."},
+  {"file": "doc2.pdf", "status": "pending", "operation": "operations/..."}
+]
+```
+
+**Benefits**:
+- **Faster Returns**: No polling overhead (~2-10s per file saved)
+- **Bulk Operations**: Initiate thousands of uploads quickly
+- **Fire-and-Forget**: Useful for known-working file types where immediate feedback isn't needed
+- **Last-One-Wins**: Re-uploading a file automatically overwrites previous pending operations
+
+**Trade-offs**:
+- No immediate status (success/failure unknown until synced)
+- Requires manual `sync-cache` to check final status
+
+#### Sync Cache
+
+Check status of pending operations and update cache with final results:
+
+```bash
+# Sync all pending operations for a store
+gemini-file-search-tool sync-cache --store "docs" -v
+
+# Output (JSON - default):
+{
+  "status": "success",
+  "total": 10,
+  "synced": 8,
+  "failed": 1,
+  "still_pending": 1,
+  "operations": [
+    {"file": "doc1.pdf", "status": "synced", "remote_id": "documents/..."},
+    {"file": "doc2.pdf", "status": "failed", "error": {"message": "..."}}
+  ]
+}
+
+# Human-readable text output
+gemini-file-search-tool sync-cache --store "docs" --text
+
+# Output (text):
+Sync Summary:
+  Total operations: 10
+  Synced: 8
+  Failed: 1
+  Still pending: 1
+```
+
+**Features**:
+- **Progress Bar**: Visual feedback with tqdm during sync
+- **Error Details**: Captures and stores error messages from failed operations
+- **Automatic Updates**: Updates cache with remote_id when operations complete successfully
+- **Idempotent**: Safe to run multiple times (only updates changed operations)
+
+#### Cache Report
+
+Generate reports on cache status with filtering options:
+
+```bash
+# Default report (summary + pending operations)
+gemini-file-search-tool cache-report --store "docs"
+
+# Show only failed operations
+gemini-file-search-tool cache-report --store "docs" --errors-only
+
+# Show only completed uploads
+gemini-file-search-tool cache-report --store "docs" --completed-only
+
+# Show all cached files
+gemini-file-search-tool cache-report --store "docs" --all
+
+# Human-readable text output
+gemini-file-search-tool cache-report --store "docs" --text
+```
+
+**Output Example (JSON)**:
+```json
+{
+  "store": "docs",
+  "stats": {
+    "total_files": 100,
+    "completed": 95,
+    "pending_operations": 3,
+    "failed_operations": 2
+  },
+  "files": [
+    {
+      "file": "/path/to/doc.pdf",
+      "status": "pending",
+      "operation": "operations/...",
+      "hash": "abc123...",
+      "mtime": 1731969000.0
+    }
+  ]
+}
+```
+
+**Filters**:
+- `--pending-only`: Show only files with pending operations
+- `--errors-only`: Show only files with errors
+- `--completed-only`: Show only successfully uploaded files
+- `--all`: Show all cached files (overrides other filters)
+- `--text`: Human-readable text format instead of JSON
+
+#### Flush Cache
+
+Delete cache file for a specific store:
+
+```bash
+# Flush with confirmation prompt
+gemini-file-search-tool flush-cache --store "docs"
+
+# Output:
+Cache statistics for 'docs':
+  Total files: 100
+  Completed: 95
+  Pending operations: 3
+  Failed operations: 2
+
+Are you sure you want to delete this cache? [y/N]:
+
+# Force flush without confirmation
+gemini-file-search-tool flush-cache --store "docs" --force
+```
+
+**Use Cases**:
+- **Clean Slate**: Start fresh after major changes
+- **Rebuild Cache**: Use with `upload --rebuild-cache` to re-upload everything
+- **Troubleshooting**: Clear corrupted cache data
+
+#### Cache with Store Deletion
+
+When deleting a store, cache statistics are shown and the cache is automatically removed:
+
+```bash
+# Delete store with cache cleanup
+gemini-file-search-tool delete-store "docs" --force
+
+# Output shows cache stats before deletion:
+[INFO] Cache found for store 'docs':
+[INFO]   Total files: 100
+[INFO]   Completed: 95
+[INFO]   Pending operations: 3
+[INFO]   Failed operations: 2
+[INFO] Deleting store: fileSearchStores/docs-123
+[INFO] Removing cache file...
+[INFO] Cache removed successfully
+```
+
+#### Typical Workflows
+
+**Async Upload + Sync Pattern:**
+```bash
+# 1. Fast upload without waiting
+gemini-file-search-tool upload "docs/**/*.pdf" --store "my-docs" --no-wait -v
+
+# 2. Continue working on other tasks...
+
+# 3. Later, check status
+gemini-file-search-tool sync-cache --store "my-docs" -v
+
+# 4. Review any failures
+gemini-file-search-tool cache-report --store "my-docs" --errors-only
+```
+
+**Re-upload Changed Files:**
+```bash
+# Upload with last-one-wins strategy
+# If files change and you re-upload, previous pending operations are overwritten
+gemini-file-search-tool upload "docs/*.pdf" --store "my-docs" --no-wait
+
+# The cache automatically tracks the latest operation-id per file
+```
+
+**Cache Inspection:**
+```bash
+# Quick overview
+gemini-file-search-tool cache-report --store "my-docs" --text
+
+# Detailed analysis
+gemini-file-search-tool cache-report --store "my-docs" --all | jq .
+```
 
 ### Library Usage
 

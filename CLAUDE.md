@@ -96,6 +96,8 @@ make clean          # Remove build artifacts and caches
 - `get-store NAME` - Get store details
 - `update-store NAME --display-name NAME` - Update store
 - `delete-store NAME [--force]` - Delete store
+  - Shows cache statistics before deletion (total files, completed, pending, failed)
+  - Automatically removes cache file after successful store deletion
 
 ### Document Commands (document_commands.py)
 - `list-documents --store NAME [-v|-vv|-vvv]` - List documents in store
@@ -103,13 +105,20 @@ make clean          # Remove build artifacts and caches
 - `upload FILES... --store NAME [OPTIONS] [-v|-vv|-vvv]` - Upload files (supports globs)
   - **Note**: FILES is positional (changed from `--input`)
   - Supports glob patterns: `*.pdf`, `docs/**/*.md`
-  - Options: `--title`, `--url`, `--file-name`, `--max-tokens`, `--max-overlap`, `--num-workers`, `--skip-validation`, `--ignore-gitignore`, `--dry-run`
+  - Options: `--title`, `--url`, `--file-name`, `--max-tokens`, `--max-overlap`, `--num-workers`, `--skip-validation`, `--ignore-gitignore`, `--dry-run`, `--rebuild-cache`, `--no-wait`
   - **Verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE with library logging)
   - **Intelligent Caching**: Automatically tracks uploaded files to skip unchanged files
     - Uses mtime-based optimization (O(1) check before O(n) hash calculation)
     - Cache location: `~/.config/gemini-file-search-tool/stores/`
     - Per-store isolation prevents cache overwrites
+    - Cache structure: Stores hash, mtime, and either remote_id (completed) OR operation (pending) - mutually exclusive
+    - Last-one-wins strategy: Re-uploading a file overwrites previous pending operations
     - See `core/cache.py` for implementation details
+  - **Async Uploads**: `--no-wait` flag skips operation polling for faster returns
+    - Returns immediately with "pending" status and operation object
+    - Requires manual `sync-cache` to check final status
+    - Useful for bulk uploads where immediate feedback isn't needed
+  - **Rebuild Cache**: `--rebuild-cache` flag forces re-upload of all files and rebuilds cache
   - **System File Filtering**: Automatically skips `__pycache__`, `.pyc`, `.DS_Store`, etc.
   - **Gitignore Support**: Automatically respects `.gitignore` patterns (use `--ignore-gitignore` to disable)
   - **Dry-Run Mode**: Use `--dry-run` to preview files without uploading (returns JSON with file paths and sizes)
@@ -130,6 +139,31 @@ make clean          # Remove build artifacts and caches
   - **Verbosity**: `-v` displays token usage and cost info, `-vv` shows API operations, `-vvv` shows HTTP traces
   - **Metadata Filtering**: `--metadata-filter "key=value"` - Filter documents by metadata
   - **Grounding**: `--query-grounding-metadata` - Include source citations in response
+
+### Cache Commands (cache_commands.py)
+- `sync-cache --store NAME [--text] [-v]` - Sync pending operations and update cache with final status
+  - Fetches status for all pending operations using `client.operations.get()`
+  - Updates cache with remote_id when operations complete successfully
+  - Stores error details for failed operations
+  - Progress bar with tqdm showing synced/failed/pending counts
+  - JSON output (default) or human-readable text with `--text`
+  - Idempotent: Safe to run multiple times
+- `flush-cache --store NAME [--force] [-v]` - Delete cache file for specific store
+  - Shows cache statistics before deletion (requires confirmation unless --force)
+  - Use for clean slate, troubleshooting, or before rebuild
+- `cache-report --store NAME [FILTERS] [--text] [-v]` - Generate cache status report
+  - Shows summary statistics (total, completed, pending, failed)
+  - Default: Summary + pending operations
+  - Filters: `--pending-only`, `--errors-only`, `--completed-only`, `--all`
+  - JSON output (default) or human-readable text with `--text`
+
+**Implementation Notes** (cache_commands.py):
+- **SDK Bug Workaround**: `operations.get()` expects an operation object, not a string
+  - Solution: Construct `genai.types.UploadToFileSearchStoreOperation(name=operation_name)`
+  - Type stub doesn't reflect runtime behavior, requires `type: ignore[call-arg]`
+- **Operation Status Checking**: Uses hasattr() checks for safe attribute access
+- **Progress Tracking**: tqdm progress bar with postfix showing counts
+- **Error Handling**: Captures full operation object including error details
 
 ## Library Usage
 
