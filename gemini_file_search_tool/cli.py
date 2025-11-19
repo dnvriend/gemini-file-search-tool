@@ -9,6 +9,11 @@ and has been reviewed and tested by a human.
 
 import click
 
+from gemini_file_search_tool.commands.cache_commands import (
+    cache_report,
+    flush_cache,
+    sync_cache,
+)
 from gemini_file_search_tool.commands.document_commands import (
     list_documents,
     upload,
@@ -73,6 +78,11 @@ cli.add_command(upload)
 
 # Register query commands
 cli.add_command(query)
+
+# Register cache commands
+cli.add_command(sync_cache)
+cli.add_command(flush_cache)
+cli.add_command(cache_report)
 
 
 def main() -> None:

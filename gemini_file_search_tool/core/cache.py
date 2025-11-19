@@ -155,27 +155,42 @@ class CacheManager:
         store_name: str,
         file_path: str,
         remote_id: str | None = None,
+        operation: dict[str, Any] | None = None,
         content_hash: str | None = None,
         mtime: float | None = None,
     ) -> None:
         """Update the cached state of a file.
 
+        Uses last-one-wins strategy: New uploads overwrite existing pending operations.
+
         Args:
             store_name: Name of the store
             file_path: Absolute path to the file
-            remote_id: ID of the document in the store
+            remote_id: ID of the document in the store (mutually exclusive with operation)
+            operation: Operation object for pending uploads (mutually exclusive with remote_id)
             content_hash: SHA256 hash of the file content
             mtime: File modification time (Unix timestamp)
+
+        Note:
+            - If remote_id is provided, removes any existing operation object (upload complete)
+            - If operation is provided, removes any existing remote_id (new pending upload)
+            - Last-one-wins: Re-uploading a file overwrites previous operation/remote_id
         """
         # Load current cache for this store
         cache_data = self._load_cache(store_name)
 
-        # Get existing state to preserve fields if not provided
-        current_state = cache_data.get(file_path, {})
+        # Last-one-wins: Start fresh for this file
+        new_state: dict[str, Any] = {}
 
-        new_state = current_state.copy()
+        # Mutually exclusive: operation OR remote_id
         if remote_id:
             new_state["remote_id"] = remote_id
+            logger.debug(f"Setting remote_id for {Path(file_path).name}")
+        elif operation:
+            new_state["operation"] = operation
+            logger.debug(f"Setting operation for {Path(file_path).name}")
+
+        # Always update hash and mtime if provided
         if content_hash:
             new_state["hash"] = content_hash
         if mtime is not None:
@@ -188,9 +203,10 @@ class CacheManager:
 
         logger.info(
             f"Updating cache for {Path(file_path).name}: "
-            f"remote_id={remote_id or 'unchanged'}, "
-            f"hash={content_hash[:8] + '...' if content_hash else 'unchanged'}, "
-            f"mtime={mtime or 'unchanged'}"
+            f"remote_id={remote_id or 'N/A'}, "
+            f"operation={'present' if operation else 'N/A'}, "
+            f"hash={content_hash[:8] + '...' if content_hash else 'N/A'}, "
+            f"mtime={mtime or 'N/A'}"
         )
 
         cache_data[file_path] = new_state
@@ -221,3 +237,55 @@ class CacheManager:
             file_count = len(cache_data)
             logger.info(f"Clearing cache for store '{store_name}' ({file_count} file(s))")
             cache_file.unlink()  # Delete the file
+
+    def get_pending_operations(self, store_name: str) -> dict[str, dict[str, Any]]:
+        """Get all files with pending operations.
+
+        Args:
+            store_name: Name of the store
+
+        Returns:
+            Dictionary mapping file paths to their operation objects
+        """
+        cache_data = self._load_cache(store_name)
+        pending = {
+            path: state
+            for path, state in cache_data.items()
+            if "operation" in state and state["operation"] is not None
+        }
+        logger.debug(f"Found {len(pending)} file(s) with pending operations")
+        return pending
+
+    def get_cache_stats(self, store_name: str) -> dict[str, Any]:
+        """Get statistics about the cache.
+
+        Args:
+            store_name: Name of the store
+
+        Returns:
+            Dictionary with cache statistics:
+            - total_files: Total number of cached files
+            - completed: Files with remote_id (upload complete)
+            - pending_operations: Files with pending operations
+            - failed_operations: Files with failed operations (done=True but no remote_id)
+        """
+        cache_data = self._load_cache(store_name)
+        stats = {
+            "total_files": len(cache_data),
+            "completed": 0,
+            "pending_operations": 0,
+            "failed_operations": 0,
+        }
+
+        for state in cache_data.values():
+            if "remote_id" in state and state["remote_id"]:
+                stats["completed"] += 1
+            elif "operation" in state and state["operation"]:
+                operation = state["operation"]
+                # Check if operation is done but failed (no remote_id)
+                if isinstance(operation, dict) and operation.get("done", False):
+                    stats["failed_operations"] += 1
+                else:
+                    stats["pending_operations"] += 1
+
+        return stats

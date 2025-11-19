@@ -219,6 +219,7 @@ def upload_file(
     max_tokens: int = 200,
     max_overlap: int = 20,
     skip_validation: bool = False,
+    wait_for_completion: bool = True,
 ) -> dict[str, Any]:
     """Upload a single file to a file search store.
 
@@ -231,13 +232,16 @@ def upload_file(
         max_tokens: Max tokens per chunk (default: 200)
         max_overlap: Max overlap tokens (default: 20)
         skip_validation: Skip file validation checks
+        wait_for_completion: Wait for operation to complete (default: True).
+            If False, returns immediately with operation object (no polling).
 
     Returns:
         Dictionary containing:
             - file: File path (as string)
-            - status: 'completed' or 'failed'
-            - operation: Operation name (if available)
-            - document: Document info dict with name and display_name (if successful)
+            - status: 'completed', 'pending', or 'failed'
+            - operation: Operation object (if wait_for_completion=False)
+            - operation_name: Operation name (if available)
+            - document: Document info dict with name and display_name (if successful and waited)
             - error: Error message (if failed)
 
     Raises:
@@ -309,6 +313,23 @@ def upload_file(
         operation_id = operation.name if hasattr(operation, "name") else "unknown"
         logger.debug(f"Operation started: {operation_id}")
 
+        # If not waiting, return immediately with operation object
+        if not wait_for_completion:
+            logger.info(f"Upload initiated (no-wait mode): {file_path}")
+            result["status"] = "pending"
+            result["operation_name"] = operation_id
+            # Store the entire operation object for cache
+            metadata_dict: dict[str, Any] = {}
+            if hasattr(operation, "metadata") and operation.metadata is not None:
+                metadata_dict = dict(operation.metadata)
+
+            result["operation"] = {
+                "name": operation_id,
+                "done": operation.done if hasattr(operation, "done") else False,
+                "metadata": metadata_dict,
+            }
+            return result
+
         # Poll for completion with exponential backoff
         poll_interval: float = 2.0
         max_interval: float = 30.0
@@ -336,7 +357,7 @@ def upload_file(
 
         # Success
         result["status"] = "completed"
-        result["operation"] = operation.name if hasattr(operation, "name") else None
+        result["operation_name"] = operation.name if hasattr(operation, "name") else None
         logger.info(f"Upload completed successfully: {file_path}")
 
         # Extract document name from operation response
@@ -411,6 +432,7 @@ def upload_files_concurrent(
     skip_validation: bool = False,
     num_workers: int | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    wait_for_completion: bool = True,
 ) -> list[dict[str, Any]]:
     """Upload multiple files concurrently to a file search store.
 
@@ -426,13 +448,16 @@ def upload_files_concurrent(
         num_workers: Number of concurrent workers (default: CPU count)
         progress_callback: Optional callback function called after each upload
             completes. Receives the result dict.
+        wait_for_completion: Wait for operations to complete (default: True).
+            If False, returns immediately with operation objects (no polling).
 
     Returns:
         List of dictionaries, one per file, each containing:
             - file: File path (as string)
-            - status: 'completed', 'failed', 'skipped', or 'updated'
-            - operation: Operation name (if available)
-            - document: Document info (if successful)
+            - status: 'completed', 'pending', 'failed', 'skipped', or 'updated'
+            - operation: Operation object (if wait_for_completion=False)
+            - operation_name: Operation name (if available)
+            - document: Document info (if successful and waited)
             - error: Error message (if failed)
             - reason: Reason for skip (if skipped)
 
@@ -460,6 +485,7 @@ def upload_files_concurrent(
             max_tokens,
             max_overlap,
             skip_validation,
+            wait_for_completion,
         )
         for file_path in files
     ]

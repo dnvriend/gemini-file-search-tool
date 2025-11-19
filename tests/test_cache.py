@@ -35,7 +35,9 @@ class TestCacheManager(unittest.TestCase):
         content_hash = "abc123hash"
         mtime = 1731969000.0
 
-        self.cache_manager.update_file_state(store, file_path, remote_id, content_hash, mtime)
+        self.cache_manager.update_file_state(
+            store, file_path, remote_id=remote_id, content_hash=content_hash, mtime=mtime
+        )
 
         state = self.cache_manager.get_file_state(store, file_path)
         self.assertIsNotNone(state)
@@ -48,7 +50,9 @@ class TestCacheManager(unittest.TestCase):
         store = "test-store"
         file_path = "/path/to/file.py"
 
-        self.cache_manager.update_file_state(store, file_path, "doc/1", "hash1")
+        self.cache_manager.update_file_state(
+            store, file_path, remote_id="doc/1", content_hash="hash1"
+        )
 
         # Create new manager instance to verify load from disk
         new_manager = CacheManager(app_name="test-app")

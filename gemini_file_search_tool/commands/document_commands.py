@@ -425,6 +425,11 @@ def _fetch_existing_documents(store_name: str, verbose: bool | int) -> dict[str,
     is_flag=True,
     help="Force re-upload of all files and rebuild the local cache",
 )
+@click.option(
+    "--no-wait",
+    is_flag=True,
+    help="Don't wait for operations to complete (returns immediately with operation IDs)",
+)
 def upload(
     files: tuple[str, ...],
     store_name: str,
@@ -439,6 +444,7 @@ def upload(
     ignore_gitignore: bool,
     dry_run: bool,
     rebuild_cache: bool,
+    no_wait: bool,
 ) -> None:
     """Upload file(s) to a file search store. Supports glob patterns.
 
@@ -684,7 +690,7 @@ def upload(
                     abs_path = str(file_path.resolve())
 
                     if result["status"] in ("completed", "updated"):
-                        # Update cache on success
+                        # Update cache on success with remote_id
                         doc_name = result.get("document", {}).get("name")
                         if doc_name:
                             # Calculate hash again (or we could have passed it through)
@@ -693,7 +699,24 @@ def upload(
                             content_hash = cache_manager.calculate_hash(file_path)
                             file_mtime = file_path.stat().st_mtime
                             cache_manager.update_file_state(
-                                normalized_name, abs_path, doc_name, content_hash, file_mtime
+                                normalized_name,
+                                abs_path,
+                                remote_id=doc_name,
+                                content_hash=content_hash,
+                                mtime=file_mtime,
+                            )
+                    elif result["status"] == "pending":
+                        # Update cache with operation object (no-wait mode)
+                        operation = result.get("operation")
+                        if operation:
+                            content_hash = cache_manager.calculate_hash(file_path)
+                            file_mtime = file_path.stat().st_mtime
+                            cache_manager.update_file_state(
+                                normalized_name,
+                                abs_path,
+                                operation=operation,
+                                content_hash=content_hash,
+                                mtime=file_mtime,
                             )
 
                     if file_path in updated_files and result["status"] == "completed":
@@ -728,6 +751,7 @@ def upload(
                     skip_validation=skip_validation,
                     num_workers=num_workers,
                     progress_callback=progress_callback,
+                    wait_for_completion=not no_wait,
                 )
 
                 results.extend(upload_results)

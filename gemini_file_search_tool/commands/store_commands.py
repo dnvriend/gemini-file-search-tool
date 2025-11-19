@@ -11,6 +11,7 @@ import sys
 
 import click
 
+from gemini_file_search_tool.core.cache import CacheManager
 from gemini_file_search_tool.core.client import MissingConfigurationError
 from gemini_file_search_tool.core.stores import (
     StoreError,
@@ -218,8 +219,27 @@ def delete_store(store_name: str, force: bool, verbose: bool) -> None:
     """
     try:
         normalized_name = normalize_store_name(store_name)
+
+        # Check for cache and show stats
+        cache_manager = CacheManager()
+        cache_stats = cache_manager.get_cache_stats(normalized_name)
+
+        if cache_stats["total_files"] > 0:
+            print_verbose(f"Cache found for store '{store_name}':", verbose)
+            print_verbose(f"  Total files: {cache_stats['total_files']}", verbose)
+            print_verbose(f"  Completed: {cache_stats['completed']}", verbose)
+            print_verbose(f"  Pending operations: {cache_stats['pending_operations']}", verbose)
+            print_verbose(f"  Failed operations: {cache_stats['failed_operations']}", verbose)
+
         print_verbose(f"Deleting store: {normalized_name}", verbose)
         result = core_delete_store(normalized_name, force)
+
+        # Remove cache file after successful store deletion
+        if cache_stats["total_files"] > 0:
+            print_verbose("Removing cache file...", verbose)
+            cache_manager.clear_store_cache(normalized_name)
+            print_verbose("Cache removed successfully", verbose)
+
         print_verbose("Store deleted successfully", verbose)
         output_json(result)
     except MissingConfigurationError as e:
