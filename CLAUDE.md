@@ -15,12 +15,13 @@ gemini_file_search_tool/
 ├── __init__.py              # Public API exports for library usage
 ├── cli.py                   # Main CLI entry point (Click group)
 ├── core/                    # Core library functions (importable)
+│   ├── cache.py            # Local cache management (mtime-based optimization)
 │   ├── client.py           # Gemini API client management
 │   ├── stores.py           # Store CRUD operations
 │   ├── documents.py        # Document operations (list, upload)
 │   ├── query.py            # Query operations
-│   └── query_enhancement.py # Query enhancement engine (NEW)
-├── prompts/                 # Enhancement prompt templates (NEW)
+│   └── query_enhancement.py # Query enhancement engine
+├── prompts/                 # Enhancement prompt templates
 │   ├── generic_rag.py      # Generic RAG optimization template
 │   ├── code_rag.py         # Code-specific optimization template
 │   └── obsidian.py         # Obsidian/PKM optimization template
@@ -104,6 +105,11 @@ make clean          # Remove build artifacts and caches
   - Supports glob patterns: `*.pdf`, `docs/**/*.md`
   - Options: `--title`, `--url`, `--file-name`, `--max-tokens`, `--max-overlap`, `--num-workers`, `--skip-validation`, `--ignore-gitignore`, `--dry-run`
   - **Verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE with library logging)
+  - **Intelligent Caching**: Automatically tracks uploaded files to skip unchanged files
+    - Uses mtime-based optimization (O(1) check before O(n) hash calculation)
+    - Cache location: `~/.config/gemini-file-search-tool/stores/`
+    - Per-store isolation prevents cache overwrites
+    - See `core/cache.py` for implementation details
   - **System File Filtering**: Automatically skips `__pycache__`, `.pyc`, `.DS_Store`, etc.
   - **Gitignore Support**: Automatically respects `.gitignore` patterns (use `--ignore-gitignore` to disable)
   - **Dry-Run Mode**: Use `--dry-run` to preview files without uploading (returns JSON with file paths and sizes)
@@ -289,6 +295,28 @@ gemini-file-search-tool query "What design patterns are used?" \
   - Validates required configuration before creating client
   - Uses singleton pattern for client instance
   - Raises `MissingConfigurationError` with helpful messages for missing configuration
+- **Cache System** (`core/cache.py`):
+  - **Location**: `~/.config/gemini-file-search-tool/stores/`
+  - **Structure**: One JSON file per store (e.g., `fileSearchStores__my-store.json`)
+  - **Filename Sanitization**: Store names with "/" converted to "__" for filesystem safety
+  - **Cache Contents**: Each file maps absolute paths to state objects:
+    ```json
+    {
+      "/absolute/path/to/file.py": {
+        "hash": "sha256-hash",
+        "mtime": 1731969000.0,
+        "remote_id": "documents/123",
+        "last_uploaded": "2025-11-18T22:30:00Z"
+      }
+    }
+    ```
+  - **Performance Optimization**: O(n) → O(1) using mtime checks
+    - First checks file modification time (O(1) filesystem stat)
+    - Only calculates SHA256 hash (O(n)) if mtime changed
+    - For 1000 unchanged files: ~0.1s (mtime check) vs ~5-10s (full hash)
+  - **Load-on-Demand**: No in-memory cache, always loads from disk for consistency
+  - **Per-Store Isolation**: Prevents cache overwrites when uploading to different stores
+  - **Implementation Details**: See `docs/cache-design.md` for full architecture and benchmarks
 - **Store Name Resolution**: `normalize_store_name()` accepts display names, IDs, or full resource names
 - **Upload Behavior**: Automatically detects duplicates, skips unchanged files, updates changed files
 - **File Validation** (`core/documents.py:_validate_file()`):

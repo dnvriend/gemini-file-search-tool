@@ -87,6 +87,7 @@ gemini-file-search-tool query "Where is error handling for API calls implemented
 - ✅ **Fully Managed RAG**: Automatic chunking, embeddings, and retrieval without infrastructure management
 - ✅ **Multi-Format Support**: PDF, DOCX, TXT, JSON, CSV, HTML, and source code files
 - ✅ **Code-RAG Enabled**: Upload codebases and query with natural language for semantic code search
+- ✅ **Intelligent Caching**: Local mtime-based cache (O(1) performance) prevents unnecessary re-uploads
 - ✅ **Query Enhancement**: LLM-powered query optimization for better RAG retrieval (generic, code-rag, obsidian modes)
 - ✅ **Natural Language Queries**: Ask questions in plain language and get contextual answers
 - ✅ **Automatic Citations**: Built-in source attribution and grounding metadata
@@ -387,6 +388,17 @@ gemini-file-search-tool query "What is this about?" \
 - Cost estimates are calculated locally using published pricing
 
 ### Upload Features
+
+**Intelligent Caching**:
+- **Local Cache**: Automatically tracks uploaded files at `~/.config/gemini-file-search-tool/stores/`
+- **Per-Store Isolation**: Each store maintains its own cache file (e.g., `fileSearchStores__my-store.json`)
+- **mtime Optimization**: O(n) → O(1) performance - checks file modification time before computing expensive SHA256 hash
+- **Smart Re-uploads**: Only uploads files that have actually changed (skips identical files automatically)
+- **Cache Structure**: Stores hash, mtime, remote_id, and last_uploaded timestamp for each file
+- **Performance Impact**:
+  - **Large codebases (1000 files)**: Cache check ~0.1 seconds vs ~5-10 seconds without cache
+  - **Network I/O remains the bottleneck**: Upload time (5-10s per file) dominates hash calculation (500ms)
+  - See `docs/cache-design.md` for detailed performance analysis and architecture
 
 **Automatic File Validation**:
 - **Empty Files**: 0-byte files automatically skipped with warning
