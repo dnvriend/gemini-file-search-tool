@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+from google import genai
 from tqdm import tqdm
 
 from gemini_file_search_tool.core.cache import CacheManager
@@ -116,7 +117,10 @@ def sync_cache(store_name: str, verbose: int, text: bool) -> None:
                 try:
                     # Fetch operation status
                     logger.debug(f"Checking operation: {operation_name}")
-                    operation = client.operations.get(operation_name)
+                    # Create operation object with name for SDK's operations.get()
+                    # Type stub doesn't reflect runtime behavior, name arg works at runtime
+                    op_ref = genai.types.UploadToFileSearchStoreOperation(name=operation_name)  # type: ignore[call-arg]
+                    operation = client.operations.get(op_ref)
 
                     # Store updated operation object
                     updated_operation = {
@@ -162,7 +166,7 @@ def sync_cache(store_name: str, verbose: int, text: bool) -> None:
                             mtime=state.get("mtime"),
                         )
                     # Check if done
-                    elif operation.done:
+                    elif hasattr(operation, "done") and operation.done:
                         # Extract document name
                         doc_name = None
                         if hasattr(operation, "response") and operation.response:
