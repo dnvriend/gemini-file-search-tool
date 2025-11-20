@@ -137,7 +137,7 @@ def get_store(store_name: str) -> dict[str, Any]:
             for _ in client.file_search_stores.documents.list(parent=store_name):
                 document_count += 1
             store_info["document_count"] = document_count
-        except Exception:
+        except Exception:  # nosec B110
             # Non-fatal: continue without document count
             pass
 

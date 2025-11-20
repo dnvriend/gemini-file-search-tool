@@ -1,0 +1,8 @@
+{
+    "name": "gemini-file-search-tool",
+    "description": "CLI tool for managing Gemini File Search stores with fully managed RAG",
+    "version": "0.1.0",
+    "author": {
+        "name": "Dennis Vriend"
+    }
+}

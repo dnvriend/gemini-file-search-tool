@@ -85,7 +85,7 @@ def _load_gitignore_patterns(start_path: Path) -> list[str]:
                         # Skip empty lines and comments
                         if line and not line.startswith("#"):
                             patterns.append(line)
-            except Exception:
+            except Exception:  # nosec B110
                 pass  # Ignore read errors
             break  # Only use first .gitignore found
         current = current.parent
@@ -331,7 +331,7 @@ def _fetch_existing_documents(store_name: str, verbose: bool | int) -> dict[str,
             if page_token:
                 params["pageToken"] = page_token
 
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
 
             data = response.json()

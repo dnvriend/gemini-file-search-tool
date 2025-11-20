@@ -119,7 +119,7 @@ def list_documents(store_name: str) -> list[dict[str, Any]]:
             if page_token:
                 params["pageToken"] = page_token
 
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
 
             data = response.json()
@@ -205,7 +205,7 @@ def _validate_file(file_path: Path, skip_validation: bool) -> None:
     except FileValidationError:
         # Re-raise validation errors
         raise
-    except Exception:
+    except Exception:  # nosec B110
         # Non-fatal: continue with upload attempt
         pass
 

@@ -1,0 +1,15 @@
+{
+    "name": "gemini-file-search-tool",
+    "owner": {
+        "name": "Dennis Vriend",
+        "email": "dvriend@ilionx.com",
+        "url": "https://github.com/dnvriend/gemini-file-search-tool"
+    },
+    "plugins": [
+        {
+            "name": "gemini-file-search-tool",
+            "source": "./plugins/gemini-file-search-tool",
+            "description": "Manage Gemini File Search stores and query with RAG"
+        }
+    ]
+}
