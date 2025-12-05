@@ -44,10 +44,12 @@ run: ## Run gemini-file-search-tool (usage: make run ARGS="...")
 	uv run gemini-file-search-tool $(ARGS)
 
 build: ## Build package
-	uv build
+	uv build --force-pep517
 
 install-global: ## Install globally with uv tool
-	uv tool install . --reinstall
+	uv tool uninstall gemini-file-search-tool || true
+	uv build --force-pep517
+	uv tool install .
 
 uninstall-global: ## Uninstall global installation
 	uv tool uninstall gemini-file-search-tool

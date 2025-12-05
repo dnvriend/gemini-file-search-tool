@@ -1,7 +1,7 @@
 [project]
 name = "gemini-file-search-tool"
 version = "0.1.0"
-description = "Gemini File Search Tool"
+description = "A CLI tool for managed RAG using Google Gemini File Search API"
 requires-python = ">=3.14"
 dependencies = [
     "click>=8.1.7",
@@ -14,6 +14,37 @@ authors = [
 ]
 license = {text = "MIT"}
 readme = "README.md"
+keywords = [
+    "gemini",
+    "rag",
+    "retrieval-augmented-generation",
+    "file-search",
+    "ai",
+    "nlp",
+    "document-search",
+    "semantic-search",
+    "google-ai",
+    "cli-tool",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/dnvriend/gemini-file-search-tool"
+Repository = "https://github.com/dnvriend/gemini-file-search-tool"
+Issues = "https://github.com/dnvriend/gemini-file-search-tool/issues"
+Documentation = "https://github.com/dnvriend/gemini-file-search-tool#readme"
 
 [project.scripts]
 gemini-file-search-tool = "gemini_file_search_tool.cli:main"
