@@ -140,6 +140,8 @@ def estimate_cost(usage_metadata: dict[str, int] | None, model: str) -> dict[str
     Current pricing (as of 2025-01):
     - gemini-2.5-flash: $0.075 input / $0.30 output per 1M tokens
     - gemini-2.5-pro: $1.25 input / $5.00 output per 1M tokens
+    - gemini-3-flash-preview: $0.50 input / $3.00 output per 1M tokens
+    - gemini-3-pro-preview: $2.00 input / $12.00 output per 1M tokens
 
     Args:
         usage_metadata: Dictionary with prompt_token_count and candidates_token_count
@@ -164,6 +166,8 @@ def estimate_cost(usage_metadata: dict[str, int] | None, model: str) -> dict[str
     pricing = {
         "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
         "gemini-2.5-pro": {"input": 1.25, "output": 5.00},
+        "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
+        "gemini-3-pro-preview": {"input": 2.00, "output": 12.00},
     }
 
     # Normalize model name (remove version suffixes if present)

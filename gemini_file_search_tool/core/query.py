@@ -91,6 +91,7 @@ def query_store(
     model: str = "gemini-2.5-flash",
     metadata_filter: str | None = None,
     include_grounding: bool = False,
+    thinking_level: str | None = None,
 ) -> dict[str, Any]:
     """Query documents in a file search store.
 
@@ -100,6 +101,7 @@ def query_store(
         model: Model to use (default: 'gemini-2.5-flash', or 'gemini-2.5-pro')
         metadata_filter: Metadata filter expression (optional, e.g., 'author=Robert Graves')
         include_grounding: Include grounding metadata in response (default: False)
+        thinking_level: Thinking depth for Gemini 3 models (minimal, low, medium, high)
 
     Returns:
         Dictionary containing:
@@ -120,11 +122,31 @@ def query_store(
         if metadata_filter:
             file_search_config.metadata_filter = metadata_filter
 
+        # Build generate content config
+        config_kwargs: dict[str, Any] = {
+            "tools": [types.Tool(file_search=file_search_config)],
+        }
+
+        # Add thinking config for Gemini 3 models
+        if thinking_level and model.startswith("gemini-3"):
+            # Map string to ThinkingLevel enum
+            level_map = {
+                "minimal": types.ThinkingLevel.MINIMAL,
+                "low": types.ThinkingLevel.LOW,
+                "medium": types.ThinkingLevel.MEDIUM,
+                "high": types.ThinkingLevel.HIGH,
+            }
+            thinking_level_enum = level_map.get(thinking_level.lower())
+            if thinking_level_enum:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(
+                    thinking_level=thinking_level_enum
+                )
+
         # Generate content
         response = client.models.generate_content(
             model=model,
             contents=prompt,
-            config=types.GenerateContentConfig(tools=[types.Tool(file_search=file_search_config)]),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
 
         # Extract response text

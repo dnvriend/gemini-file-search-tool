@@ -45,15 +45,21 @@ from gemini_file_search_tool.utils import (
 )
 @click.option(
     "--enhancement-model",
-    type=click.Choice(["flash", "pro"], case_sensitive=False),
+    type=click.Choice(["flash", "pro", "3-flash", "3-pro"], case_sensitive=False),
     default="flash",
-    help="Model for query enhancement (default: flash)",
+    help="Model for query enhancement: flash (2.5), pro (2.5), 3-flash, 3-pro (default: flash)",
 )
 @click.option(
     "--query-model",
-    type=click.Choice(["flash", "pro"], case_sensitive=False),
+    type=click.Choice(["flash", "pro", "3-flash", "3-pro"], case_sensitive=False),
     default="flash",
-    help="Model for RAG query (default: flash)",
+    help="Model for RAG query: flash (2.5), pro (2.5), 3-flash, 3-pro (default: flash)",
+)
+@click.option(
+    "--thinking-level",
+    type=click.Choice(["minimal", "low", "medium", "high"], case_sensitive=False),
+    default=None,
+    help="Thinking depth for Gemini 3 models: minimal, low, medium, high (default: high)",
 )
 @click.option(
     "--metadata-filter",
@@ -93,6 +99,7 @@ def query(
     enhance_mode: str | None,
     enhancement_model: str,
     query_model: str,
+    thinking_level: str | None,
     metadata_filter: str | None,
     verbose: int,
     query_grounding_metadata: bool,
@@ -180,9 +187,21 @@ def query(
 
         if enhancement_mode_type:
             # Map model names to full model identifiers
-            enhancement_model_name: Literal["gemini-2.5-flash", "gemini-2.5-pro"] = (
-                "gemini-2.5-pro" if enhancement_model == "pro" else "gemini-2.5-flash"
-            )
+            model_map: dict[
+                str,
+                Literal[
+                    "gemini-2.5-flash",
+                    "gemini-2.5-pro",
+                    "gemini-3-flash-preview",
+                    "gemini-3-pro-preview",
+                ],
+            ] = {
+                "flash": "gemini-2.5-flash",
+                "pro": "gemini-2.5-pro",
+                "3-flash": "gemini-3-flash-preview",
+                "3-pro": "gemini-3-pro-preview",
+            }
+            enhancement_model_name = model_map.get(enhancement_model, "gemini-2.5-flash")
 
             print_verbose(f'Original query: "{original_prompt}"', verbose > 0)
             print_verbose(
@@ -245,9 +264,13 @@ def query(
                 return
 
         # Execute RAG query phase
-        query_model_name: Literal["gemini-2.5-flash", "gemini-2.5-pro"] = (
-            "gemini-2.5-pro" if query_model == "pro" else "gemini-2.5-flash"
-        )
+        model_map = {
+            "flash": "gemini-2.5-flash",
+            "pro": "gemini-2.5-pro",
+            "3-flash": "gemini-3-flash-preview",
+            "3-pro": "gemini-3-pro-preview",
+        }
+        query_model_name = model_map.get(query_model, "gemini-2.5-flash")
         print_verbose("Executing RAG query...", verbose > 0)
         print_verbose(
             f"Querying store '{normalized_name}' with model '{query_model_name}'", verbose > 0
@@ -256,6 +279,9 @@ def query(
         if metadata_filter:
             print_verbose(f"Using metadata filter: {metadata_filter}", verbose > 0)
 
+        if thinking_level and query_model_name.startswith("gemini-3"):
+            print_verbose(f"Using thinking level: {thinking_level}", verbose > 0)
+
         # Query store with (possibly enhanced) prompt
         result = core_query(
             store_name=normalized_name,
@@ -263,6 +289,7 @@ def query(
             model=query_model_name,
             metadata_filter=metadata_filter,
             include_grounding=query_grounding_metadata,
+            thinking_level=thinking_level,
         )
 
         # Add enhancement metadata to result if present

@@ -83,6 +83,39 @@ def test_estimate_cost_pro_model() -> None:
     assert result["total_cost_usd"] == pytest.approx(0.005625)
 
 
+def test_estimate_cost_3_flash_model() -> None:
+    """Test cost estimation for gemini-3-flash-preview model."""
+    usage = {"prompt_token_count": 1000, "candidates_token_count": 2000, "total_token_count": 3000}
+    result = estimate_cost(usage, "gemini-3-flash-preview")
+
+    assert result is not None
+    assert result["model"] == "gemini-3-flash-preview"
+    assert result["currency"] == "USD"
+    # 3-Flash pricing: $0.50 per 1M input, $3.00 per 1M output
+    # Input cost: 1000 / 1_000_000 * 0.50 = 0.0005
+    # Output cost: 2000 / 1_000_000 * 3.00 = 0.006
+    # Total: 0.0065
+    assert result["input_cost_usd"] == pytest.approx(0.0005)
+    assert result["output_cost_usd"] == pytest.approx(0.006)
+    assert result["total_cost_usd"] == pytest.approx(0.0065)
+
+
+def test_estimate_cost_3_pro_model() -> None:
+    """Test cost estimation for gemini-3-pro-preview model."""
+    usage = {"prompt_token_count": 500, "candidates_token_count": 1000, "total_token_count": 1500}
+    result = estimate_cost(usage, "gemini-3-pro-preview")
+
+    assert result is not None
+    assert result["model"] == "gemini-3-pro-preview"
+    # 3-Pro pricing: $2.00 per 1M input, $12.00 per 1M output
+    # Input cost: 500 / 1_000_000 * 2.00 = 0.001
+    # Output cost: 1000 / 1_000_000 * 12.00 = 0.012
+    # Total: 0.013
+    assert result["input_cost_usd"] == pytest.approx(0.001)
+    assert result["output_cost_usd"] == pytest.approx(0.012)
+    assert result["total_cost_usd"] == pytest.approx(0.013)
+
+
 def test_estimate_cost_none_usage() -> None:
     """Test cost estimation with None usage_metadata."""
     result = estimate_cost(None, "gemini-2.5-flash")

@@ -31,7 +31,9 @@ class QueryEnhancementError(Exception):
 def enhance_query(
     query: str,
     enhancement_mode: Literal["generic", "code-rag", "obsidian"],
-    model: Literal["gemini-2.5-flash", "gemini-2.5-pro"] = "gemini-2.5-flash",
+    model: Literal[
+        "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3-pro-preview"
+    ] = "gemini-2.5-flash",
 ) -> tuple[str, dict[str, int]]:
     """Enhance query using Gemini LLM for optimal RAG retrieval.
 
